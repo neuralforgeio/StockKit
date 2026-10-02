@@ -1,0 +1,15 @@
+DROP TABLE IF EXISTS outbox_events;
+DROP TABLE IF EXISTS idempotency_keys;
+DROP TRIGGER IF EXISTS audit_log_guard ON audit_log;
+DROP FUNCTION IF EXISTS audit_log_immutable();
+DROP TABLE IF EXISTS audit_log;
+DROP TABLE IF EXISTS signing_keys;
+DROP TABLE IF EXISTS refresh_tokens;
+DROP TABLE IF EXISTS refresh_families;
+DROP TABLE IF EXISTS user_roles;
+DROP TABLE IF EXISTS role_permissions;
+DROP TABLE IF EXISTS permissions;
+DROP TABLE IF EXISTS roles;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS tenants;
+DROP FUNCTION IF EXISTS set_updated_at();

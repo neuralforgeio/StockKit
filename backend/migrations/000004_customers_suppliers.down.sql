@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS suppliers;
+DROP TABLE IF EXISTS customers;

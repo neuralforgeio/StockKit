@@ -1,0 +1,163 @@
+/* ===== Login entrance / feedback ===== */
+@keyframes login-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15% {
+    transform: translateX(-8px);
+  }
+  30% {
+    transform: translateX(7px);
+  }
+  45% {
+    transform: translateX(-5px);
+  }
+  60% {
+    transform: translateX(4px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+}
+@keyframes login-pop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes login-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes login-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.login-shake {
+  animation: login-shake 0.55s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+.login-pop {
+  animation: login-pop 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.login-fade-up {
+  animation: login-fade-up 0.4s ease-out both;
+}
+.login-check-circle {
+  stroke-dasharray: 166;
+  stroke-dashoffset: 166;
+  animation: login-draw 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+}
+.login-check-mark {
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: login-draw 0.35s cubic-bezier(0.65, 0, 0.45, 1) 0.5s forwards;
+}
+
+/* ===== Ambient background ===== */
+@keyframes orb-float {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -40px) scale(1.1);
+  }
+  66% {
+    transform: translate(-25px, 25px) scale(0.95);
+  }
+}
+@keyframes grid-pan {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 48px 48px;
+  }
+}
+@keyframes logo-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+.login-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(64px);
+  opacity: 0.5;
+  animation: orb-float 12s ease-in-out infinite;
+}
+.login-orb-2 {
+  animation-delay: -4s;
+}
+.login-orb-3 {
+  animation-delay: -8s;
+}
+
+.login-grid {
+  background-image:
+    linear-gradient(rgba(37, 99, 235, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37, 99, 235, 0.06) 1px, transparent 1px);
+  background-size: 48px 48px;
+  animation: grid-pan 6s linear infinite;
+}
+.login-logo-float {
+  animation: logo-float 4s ease-in-out infinite;
+}
+.login-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.12),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-shake,
+  .login-pop,
+  .login-fade-up,
+  .login-orb,
+  .login-grid,
+  .login-logo-float,
+  .login-shimmer,
+  .login-check-circle,
+  .login-check-mark {
+    animation: none;
+  }
+  .login-check-circle,
+  .login-check-mark {
+    stroke-dashoffset: 0;
+  }
+}
