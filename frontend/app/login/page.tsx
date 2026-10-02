@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { LogoMark } from "@/components/brand/logo";
 import { LoginForm } from "./login-form";
 import "./login-anim.css";
@@ -12,16 +12,18 @@ const FEATURES = [
   },
   { icon: "M3 3v18h18M7 15l4-4 3 3 5-6", label: "Order-to-cash sales" },
   {
-    icon: "M9 12l2 2 4-4m5.6-4A12 12 0 0 0 12 3a12 12 0 0 0-9 21h18a12 12 0 0 0-0-12z",
+    icon: "M9 12l2 2 4-4m5.6-4A12 12 0 0 0 12 3a12 12 0 0 0-9 21h18a12 12 0 0 0 0-12z",
     label: "Approval workflows",
   },
 ];
 
-const container = {
+// Annotate with Variants so `ease` is contextually typed as a valid Easing literal.
+const container: Variants = {
   hidden: {},
   show: { transition: { staggerChildren: 0.08 } },
 };
-const item = {
+
+const item: Variants = {
   hidden: { opacity: 0, y: 16 },
   show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" } },
 };
@@ -31,7 +33,6 @@ export default function LoginPage() {
     <div className="relative flex min-h-screen bg-bg">
       {/* ===== Left brand panel (animated) ===== */}
       <div className="relative hidden w-1/2 overflow-hidden bg-[#0B0D10] lg:block">
-        {/* animated grid + orbs */}
         <div className="login-grid absolute inset-0" />
         <div
           className="login-orb h-72 w-72 bg-blue-600/40"
