@@ -11,6 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/neuralforgeio/StockKit/internal/approval"
+	"github.com/neuralforgeio/StockKit/internal/audit"
 	"github.com/neuralforgeio/StockKit/internal/auth"
 	"github.com/neuralforgeio/StockKit/internal/categories"
 	fieldcipher "github.com/neuralforgeio/StockKit/internal/crypto"
@@ -115,9 +116,8 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 	usersH := handlers.NewUsers(pool)
 	devH := handlers.NewDev(pool, "./logs")
 
-	// Audit log repository (if exists)
-	// auditRepo := audit.NewRepository(pool)
-	// auditH := handlers.NewAudit(auditRepo)
+	auditRepo := audit.NewRepository(pool)
+	auditH := handlers.NewAudit(auditRepo)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -309,6 +309,8 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 				r.Get("/disk", devH.Disk)
 				r.Get("/analytics", devH.Analytics)
 			})
+
+			r.Get("/audit-logs", auditH.List)
 
 			r.Get("/dashboard/summary", dashboardH.Summary)
 

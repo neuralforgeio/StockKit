@@ -60,12 +60,13 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-type NavChild = { href: string; label: string };
+type NavChild = { href: string; label: string; devOnly?: boolean };
 type NavItem = {
   href: string;
   label: string;
   icon: string;
   children?: NavChild[];
+  devOnly?: boolean;
 };
 type NavSection = { id: string; label: string; items: NavItem[] };
 
@@ -178,13 +179,17 @@ const navSections: NavSection[] = [
         href: "/developer",
         label: "Developer",
         icon: "M8 9l-4 3 4 3M16 9l4 3-4 3M13 5l-2 14",
+        devOnly: true,
+        children: [
+          { href: "/developer", label: "Overview" },
+          { href: "/developer/audit", label: "Audit logs", devOnly: true },
+        ],
       },
       {
-        href: "/developer/audit",
-        label: "Audit logs",
-        icon: "M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z",
+        href: "/settings",
+        label: "Settings",
+        icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z",
       },
-      { href: "/settings", label: "Settings", icon: "..." },
     ],
   },
 ];
@@ -454,13 +459,20 @@ export function Sidebar() {
       .catch(() => setIsDeveloper(false));
   }, []);
 
+  // Filter: hide items with devOnly=true when user is not developer.
   const visibleSections = useMemo(() => {
     return navSections
       .map((sec) => ({
         ...sec,
-        items: sec.items.filter((it) =>
-          it.href === "/developer" ? isDeveloper : true,
-        ),
+        items: sec.items
+          .filter((it) => (it.devOnly ? isDeveloper : true))
+          .map((it) => ({
+            ...it,
+            children: it.children?.filter((c) =>
+              c.devOnly ? isDeveloper : true,
+            ),
+          }))
+          .filter((it) => !it.devOnly || it.children?.length || true),
       }))
       .filter((sec) => sec.items.length > 0);
   }, [isDeveloper]);
