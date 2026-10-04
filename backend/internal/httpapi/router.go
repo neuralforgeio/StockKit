@@ -273,7 +273,8 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 				r.Post("/", salesH.Create)
 				r.Get("/{id}", salesH.GetByID)
 				r.Patch("/{id}", salesH.Update)
-				r.Delete("/{id}", salesH.Delete)
+				// PATCH RBAC: hanya owner/admin/sales yang boleh DELETE sales order
+				r.With(middleware.RequireRole(pool, "owner", "admin", "sales")).Delete("/{id}", salesH.Delete)
 				r.Post("/{id}/submit", salesH.Submit)
 				r.Post("/{id}/checkout", salesH.Checkout)
 				r.Post("/{id}/deliver", salesH.Deliver)
@@ -302,7 +303,9 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 				r.Post("/", fxH.Upsert)
 			})
 
+			// PATCH RBAC: /dev group hanya untuk role developer
 			r.Route("/dev", func(r chi.Router) {
+				r.Use(middleware.RequireRole(pool, "developer"))
 				r.Get("/me", devH.Me)
 				r.Get("/metrics", devH.Metrics)
 				r.Get("/logs", devH.Logs)
@@ -310,7 +313,8 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 				r.Get("/analytics", devH.Analytics)
 			})
 
-			r.Get("/audit-logs", auditH.List)
+			// PATCH RBAC: audit-logs hanya untuk developer + auditor
+			r.With(middleware.RequireRole(pool, "developer", "auditor")).Get("/audit-logs", auditH.List)
 
 			r.Get("/dashboard/summary", dashboardH.Summary)
 
