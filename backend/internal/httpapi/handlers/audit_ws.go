@@ -9,11 +9,14 @@ import (
 	mw "github.com/neuralforgeio/StockKit/internal/httpapi/middleware"
 )
 
-var upgrader = websocket.Upgrader{
+// auditUpgrader is a dedicated WebSocket upgrader for the audit realtime
+// endpoint. Renamed to avoid redeclaration conflict with the shared
+// `upgrader` declared in notification_ws.go (same package).
+var auditUpgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // allow all origins in dev; tighten in production
+		return true
 	},
 }
 
@@ -35,7 +38,7 @@ func (h *AuditWS) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := auditUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		http.Error(w, "WebSocket upgrade failed", http.StatusInternalServerError)
 		return

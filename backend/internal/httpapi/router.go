@@ -124,6 +124,8 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 
 	auditRepo := audit.NewRepository(pool)
 	auditH := handlers.NewAudit(auditRepo)
+	auditHub := audit.NewHub(logger)
+	auditWSH := handlers.NewAuditWS(auditHub)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -321,7 +323,7 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 			})
 
 			// PATCH RBAC: audit-logs hanya untuk developer + auditor
-						r.With(middleware.RequireRole(pool, "developer", "auditor")).Get("/audit-logs", auditH.List)
+			r.With(middleware.RequireRole(pool, "developer", "auditor")).Get("/audit-logs", auditH.List)
 			r.With(middleware.RequireRole(pool, "developer", "auditor")).Get("/audit-logs/export", auditH.Export)
 			r.With(middleware.RequireRole(pool, "developer", "auditor")).Get("/audit-logs/ws", auditWSH.ServeWS)
 
