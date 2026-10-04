@@ -104,9 +104,25 @@ export default function AuditPage() {
             Immutable event trail for critical entities. Developer/auditor only.
           </p>
         </div>
-        <Button variant="secondary" onClick={load}>
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={load}>
+            Refresh
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const params = new URLSearchParams({ format: "xlsx" });
+              if (filter.from) params.set("from", filter.from);
+              if (filter.to) params.set("to", filter.to);
+              window.open(
+                `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/api/v1"}/audit-logs/export?${params.toString()}`,
+                "_blank",
+              );
+            }}
+          >
+            Export Excel
+          </Button>
+        </div>
       </header>
 
       {/* Filter bar */}
