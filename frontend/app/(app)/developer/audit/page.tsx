@@ -40,6 +40,30 @@ function diffJson(
   return out;
 }
 
+function timeAgo(iso: string): string {
+  const d = new Date(iso).getTime();
+  const diff = (Date.now() - d) / 1000;
+  if (diff < 60) return `${Math.floor(diff)}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return new Date(iso).toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+const ENTITY_BADGE: Record<string, string> = {
+  sales_orders: "bg-blue-500/15 text-blue-400",
+  purchase_requests: "bg-purple-500/15 text-purple-400",
+  approval_instances: "bg-amber-500/15 text-amber-400",
+  customer_invoices: "bg-emerald-500/15 text-emerald-400",
+  supplier_invoices: "bg-rose-500/15 text-rose-400",
+  customers: "bg-cyan-500/15 text-cyan-400",
+  suppliers: "bg-pink-500/15 text-pink-400",
+  products: "bg-indigo-500/15 text-indigo-400",
+};
+
 export default function AuditLogsPage() {
   const toast = useToast();
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -217,8 +241,11 @@ export default function AuditLogsPage() {
                   onClick={() => setSelected(l)}
                   className="cursor-pointer transition-colors hover:bg-bg-subtle/50"
                 >
-                  <td className="px-4 py-2.5 text-xs text-fg-muted">
-                    {new Date(l.created_at).toLocaleString("id-ID")}
+                  <td
+                    className="px-4 py-2.5 text-xs text-fg-muted"
+                    title={new Date(l.created_at).toLocaleString("id-ID")}
+                  >
+                    {timeAgo(l.created_at)}
                   </td>
                   <td className="px-4 py-2.5">
                     <span
@@ -227,10 +254,17 @@ export default function AuditLogsPage() {
                       {l.event_type}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-fg">
-                    {l.entity_type}
+                  <td className="px-4 py-2.5">
+                    <span
+                      className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-medium ${ENTITY_BADGE[l.entity_type] ?? "bg-bg-subtle text-fg-muted"}`}
+                    >
+                      {l.entity_type.replace(/_/g, " ")}
+                    </span>
                   </td>
-                  <td className="px-4 py-2.5 font-mono text-[11px] text-fg-subtle">
+                  <td
+                    className="px-4 py-2.5 font-mono text-[11px] text-fg-subtle"
+                    title={l.entity_id}
+                  >
                     {l.entity_id.slice(0, 8)}…
                   </td>
                   <td className="px-4 py-2.5 font-mono text-[11px] text-fg-subtle">
@@ -279,13 +313,34 @@ export default function AuditLogsPage() {
             className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-xl border border-border bg-bg p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-5 flex items-start justify-between border-b border-border pb-4">
               <div>
-                <p className="text-xs uppercase tracking-wide text-fg-muted">
-                  {selected.entity_type} · {selected.event_type}
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-medium ${ENTITY_BADGE[selected.entity_type] ?? "bg-bg-subtle text-fg-muted"}`}
+                  >
+                    {selected.entity_type.replace(/_/g, " ")}
+                  </span>
+                  <span
+                    className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                      selected.event_type === "INSERT"
+                        ? "bg-success/15 text-success"
+                        : selected.event_type === "UPDATE"
+                          ? "bg-warning/15 text-warning"
+                          : "bg-danger/15 text-danger"
+                    }`}
+                  >
+                    {selected.event_type}
+                  </span>
+                </div>
+                <p className="mt-2 font-mono text-xs text-fg-subtle">
+                  Entity ID: {selected.entity_id}
                 </p>
-                <p className="mt-1 font-mono text-xs text-fg-subtle">
-                  ID: {selected.entity_id}
+                <p className="mt-0.5 text-xs text-fg-muted">
+                  {selected.actor_user_id
+                    ? `By ${selected.actor_user_id.slice(0, 8)}…`
+                    : "System"}{" "}
+                  · {new Date(selected.created_at).toLocaleString("id-ID")}
                 </p>
               </div>
               <Button
@@ -298,9 +353,13 @@ export default function AuditLogsPage() {
             </div>
             <div className="space-y-3">
               <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-fg-muted">
-                  Changed fields
-                </p>
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+                  <p className="text-xs font-semibold uppercase tracking-wide text-fg">
+                    Changed fields (
+                    {diffJson(selected.old_data, selected.new_data).length})
+                  </p>
+                </div>
                 <table className="mt-2 w-full text-xs">
                   <thead className="text-fg-subtle">
                     <tr>
