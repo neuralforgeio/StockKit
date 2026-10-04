@@ -32,7 +32,6 @@ func mapSalesError(err error) error {
 	case errors.Is(err, sales.ErrInvalidTransition):
 		return httperr.New("ILLEGAL_TRANSITION", http.StatusConflict, "Invalid state transition")
 	case errors.Is(err, sales.ErrInsufficientStock):
-		// Strip sentinel prefix, keep detail
 		msg := strings.TrimPrefix(err.Error(), "available stock is insufficient: ")
 		if msg == err.Error() {
 			msg = "Available stock is insufficient"
@@ -119,7 +118,6 @@ func (h *Sales) Create(w http.ResponseWriter, r *http.Request) {
 	for i, l := range payload.Lines {
 		lines[i] = sales.CreateLineInput{ProductID: l.ProductID, Quantity: l.Quantity, UnitPriceMinor: l.UnitPriceMinor}
 	}
-	// PATCH: pakai CreateWithCurrency, fallback "IDR" bila kosong
 	currency := payload.Currency
 	if currency == "" {
 		currency = "IDR"
@@ -134,7 +132,6 @@ func (h *Sales) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"data": so})
 }
 
-// Update handles PATCH /api/v1/sales-orders/{id}. Only draft SOs can be edited.
 func (h *Sales) Update(w http.ResponseWriter, r *http.Request) {
 	claims, ok := requestClaims(r)
 	if !ok {
@@ -165,7 +162,6 @@ func (h *Sales) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": so})
 }
 
-// Delete handles DELETE /api/v1/sales-orders/{id}. Only draft SOs can be deleted.
 func (h *Sales) Delete(w http.ResponseWriter, r *http.Request) {
 	claims, ok := requestClaims(r)
 	if !ok {
@@ -281,7 +277,7 @@ func (h *Sales) CreateCustomerInvoice(w http.ResponseWriter, r *http.Request) {
 			QtyInvoiced: l.QtyInvoiced, UnitPriceMinor: l.UnitPriceMinor,
 		}
 	}
-	inv, err := h.svc.CreateCustomerInvoice(r.Context(), claims.TenantID, claims.Subject, sales.CreateCustomerInvoiceInput{
+	inv, err := h.svc.CreateCustomerInvoiceWithCurrency(r.Context(), claims.TenantID, claims.Subject, sales.CreateCustomerInvoiceInput{
 		CustomerID: payload.CustomerID, SalesOrderID: payload.SalesOrderID,
 		DueDate: payload.DueDate, Note: payload.Note, Lines: lines,
 	}, payload.Currency)
@@ -300,6 +296,7 @@ type receiptPayload struct {
 	PaymentMethod     string  `json:"payment_method"`
 	Reference         string  `json:"reference"`
 	Note              string  `json:"note"`
+	Currency          string  `json:"currency"`
 }
 
 func (h *Sales) ListCustomerReceipts(w http.ResponseWriter, r *http.Request) {
@@ -327,11 +324,11 @@ func (h *Sales) RecordCustomerReceipt(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, httperr.New("VALIDATION_FAILED", http.StatusUnprocessableEntity, "Invalid request body"))
 		return
 	}
-	rcpt, err := h.svc.RecordCustomerReceipt(r.Context(), claims.TenantID, claims.Subject, sales.RecordReceiptInput{
+	rcpt, err := h.svc.RecordCustomerReceiptWithCurrency(r.Context(), claims.TenantID, claims.Subject, sales.RecordReceiptInput{
 		CustomerInvoiceID: payload.CustomerInvoiceID, CashAccountID: payload.CashAccountID,
 		AmountMinor: payload.AmountMinor, ReceiptDate: payload.ReceiptDate,
 		PaymentMethod: payload.PaymentMethod, Reference: payload.Reference, Note: payload.Note,
-	})
+	}, payload.Currency)
 	if err != nil {
 		httperr.Write(w, mapSalesError(err))
 		return
