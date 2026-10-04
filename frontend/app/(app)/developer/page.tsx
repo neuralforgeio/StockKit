@@ -76,37 +76,48 @@ export default function DeveloperPage() {
     }
   }, [toast]);
 
-  const loadData = useCallback(async () => {
+  // Logs polling: INDEPENDENT, never blocked by metrics failures.
+  const loadLogs = useCallback(async () => {
     try {
-      const [m, d, a, l] = await Promise.all([
-        getDevMetrics(),
-        getDevDisk(),
-        getDevAnalytics(),
-        getDevLogs(300),
-      ]);
-      setMetrics(m);
-      setDisk(d);
-      setAnalytics(a);
+      const l = await getDevLogs(300);
       setLines(l.lines);
       setLogFile(l.file);
     } catch {
-      /* silent polling */
+      /* silent */
     }
+  }, []);
+
+  // Metrics polling: allSettled so one failing endpoint doesn't kill the rest.
+  const loadMetrics = useCallback(async () => {
+    const [m, d, a] = await Promise.allSettled([
+      getDevMetrics(),
+      getDevDisk(),
+      getDevAnalytics(),
+    ]);
+    if (m.status === "fulfilled") setMetrics(m.value);
+    if (d.status === "fulfilled") setDisk(d.value);
+    if (a.status === "fulfilled") setAnalytics(a.value);
   }, []);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       await loadMe();
-      await loadData();
+      await Promise.all([loadLogs(), loadMetrics()]);
       setLoading(false);
     })();
-  }, [loadMe, loadData]);
+  }, [loadMe, loadLogs, loadMetrics]);
+
+  // Separate intervals: logs 3s, metrics 10s.
   useEffect(() => {
     if (!autoRefresh || !me?.is_developer) return;
-    const t = setInterval(loadData, 5000);
-    return () => clearInterval(t);
-  }, [autoRefresh, me, loadData]);
+    const tl = setInterval(loadLogs, 3000);
+    const tm = setInterval(loadMetrics, 10000);
+    return () => {
+      clearInterval(tl);
+      clearInterval(tm);
+    };
+  }, [autoRefresh, me, loadLogs, loadMetrics]);
 
   const parsed = useMemo(() => {
     return lines
@@ -184,9 +195,16 @@ export default function DeveloperPage() {
                 onChange={(e) => setAutoRefresh(e.target.checked)}
                 className="h-3.5 w-3.5"
               />
-              Auto-refresh 5s
+              Auto-refresh
             </label>
-            <Button variant="secondary" size="sm" onClick={loadData}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                loadLogs();
+                loadMetrics();
+              }}
+            >
               Refresh
             </Button>
           </div>
@@ -375,7 +393,11 @@ export default function DeveloperPage() {
       <div className="rounded-xl border border-border bg-bg">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
           <h3 className="text-sm font-semibold text-fg">
-            Live logs · {logFile || "—"}
+            Live logs · {logFile || "—"}{" "}
+            <span
+              className="ml-1 inline-block h-2 w-2 animate-pulse rounded-full bg-success"
+              title="auto-refresh 3s"
+            />
           </h3>
           <div className="flex flex-wrap items-center gap-2">
             <select

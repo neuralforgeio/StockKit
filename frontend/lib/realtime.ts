@@ -1,3 +1,5 @@
+import { apiFetch } from "./client";
+
 export type RealtimeEvent = {
   id: string;
   kind: string;
@@ -18,16 +20,37 @@ class RealtimeClient {
   private handlers = new Set<Handler>();
   private retry = 1000;
   private closed = false;
+  private connecting = false;
 
-  connect() {
-    if (this.closed || (this.ws && this.ws.readyState <= WebSocket.OPEN))
+  // Preflight: force token auto-refresh via apiFetch (handles 401 -> refresh -> retry)
+  // so the WS handshake never uses a stale cookie.
+  async connect() {
+    if (this.closed || this.connecting) return;
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.OPEN ||
+        this.ws.readyState === WebSocket.CONNECTING)
+    )
       return;
+    this.connecting = true;
+    try {
+      await apiFetch<unknown>("/notifications/unread-count").catch(
+        () => undefined,
+      );
+    } finally {
+      this.connecting = false;
+    }
+    this.open();
+  }
+
+  private open() {
     const url = API_BASE.replace(/^http/, "ws") + "/notifications/ws";
-    this.ws = new WebSocket(url);
-    this.ws.onopen = () => {
+    const ws = new WebSocket(url);
+    this.ws = ws;
+    ws.onopen = () => {
       this.retry = 1000;
     };
-    this.ws.onmessage = (m) => {
+    ws.onmessage = (m) => {
       try {
         const ev = JSON.parse(m.data) as RealtimeEvent;
         this.handlers.forEach((h) => h(ev));
@@ -35,15 +58,13 @@ class RealtimeClient {
         /* ignore malformed */
       }
     };
-    this.ws.onclose = () => {
+    ws.onclose = () => {
       if (!this.closed) {
         setTimeout(() => this.connect(), this.retry);
         this.retry = Math.min(this.retry * 2, 15000);
       }
     };
-    this.ws.onerror = () => {
-      this.ws?.close();
-    };
+    ws.onerror = () => ws.close();
   }
 
   on(h: Handler): () => void {
