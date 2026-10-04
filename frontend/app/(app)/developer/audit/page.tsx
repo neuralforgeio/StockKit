@@ -58,32 +58,56 @@ export default function AuditLogsPage() {
   }, [filter.from, filter.to, filter.entityType]);
 
   useEffect(() => {
-    // Subscribe WebSocket for real-time audit notifications
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/api/v1/audit-logs/ws`;
-    const ws = new WebSocket(wsUrl);
+    // WebSocket URL: gunakan API_BASE yang sudah dikonfigurasi di lib/api/base
+    // (default http://localhost:8080 → ws://localhost:8080)
+    const wsUrl =
+      (API_BASE ?? "http://localhost:8080/api/v1").replace(/^http/, "ws") +
+      "/audit-logs/ws";
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "audit_event") {
-          // Auto-refresh table saat ada event baru
-          load();
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let active = true;
+
+    const connect = () => {
+      if (!active) return;
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log("[audit-ws] connected to", wsUrl);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "audit_event") {
+            console.log("[audit-ws] new event:", data);
+            load(); // auto-refresh tabel
+          }
+        } catch {
+          /* ignore parse errors */
         }
-      } catch {
-        /* ignore parse errors */
-      }
+      };
+
+      ws.onerror = (e) => {
+        console.warn("[audit-ws] error", e);
+      };
+
+      ws.onclose = () => {
+        if (!active) return;
+        // auto-reconnect setelah 3 detik (dengan exponential backoff ringan)
+        reconnectTimer = setTimeout(connect, 3000);
+      };
     };
 
-    ws.onclose = () => {
-      // Auto-reconnect setelah 3 detik
-      setTimeout(() => {
-        window.location.reload();
-      }, 3000);
-    };
+    connect();
 
     return () => {
-      ws.close();
+      active = false;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) {
+        ws.onclose = null; // prevent auto-reconnect on intentional close
+        ws.close();
+      }
     };
   }, [load]);
 
