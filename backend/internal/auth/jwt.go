@@ -87,3 +87,23 @@ func VerifyAccessToken(tokenStr string, kp *KeyPair) (*Claims, error) {
 	}
 	return claims, nil
 }
+
+// KeyPairFromSeed rebuilds a stable KeyPair from a base64-encoded 32-byte seed
+// (env JWT_EDDSA_KEY) so sessions survive server restarts.
+func KeyPairFromSeed(b64 string) (*KeyPair, error) {
+	seed, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, fmt.Errorf("decode JWT_EDDSA_KEY: %w", err)
+	}
+	if len(seed) != ed25519.SeedSize {
+		return nil, errors.New("JWT_EDDSA_KEY must decode to 32 bytes")
+	}
+	priv := ed25519.NewKeyFromSeed(seed)
+	pub := priv.Public().(ed25519.PublicKey)
+	kidBytes := sha256.Sum256(pub)
+	return &KeyPair{
+		KID:        base64.RawURLEncoding.EncodeToString(kidBytes[:8]),
+		PrivateKey: priv,
+		PublicKey:  pub,
+	}, nil
+}

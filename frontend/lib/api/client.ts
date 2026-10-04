@@ -70,7 +70,6 @@ export async function apiFetch<T>(
     const code = env?.code ?? `HTTP_${res.status}`;
     const baseMsg = env?.message ?? "Request failed";
 
-    // Human-readable single line: [CODE] message — k=v, k=v
     let full = `[${code}] ${baseMsg}`;
     if (env?.details && Object.keys(env.details).length > 0) {
       const kv = Object.entries(env.details)
@@ -81,15 +80,24 @@ export async function apiFetch<T>(
       full += ` — ${kv}`;
     }
 
-    // Full visibility in DevTools console.
-    // eslint-disable-next-line no-console
-    console.error("[api]", {
-      status: res.status,
-      path,
-      code,
-      message: baseMsg,
-      details: env?.details ?? null,
-    });
+    // Visibility: 5xx = console.error (bug nyata); 4xx = console.warn
+    // (error domain yang expected, tidak memenuhi Next dev overlay "Issues").
+    if (typeof window !== "undefined") {
+      const payload = {
+        status: res.status,
+        path,
+        code,
+        message: baseMsg,
+        details: env?.details ?? null,
+      };
+      if (res.status >= 500) {
+        // eslint-disable-next-line no-console
+        console.error("[api]", payload);
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn("[api]", payload);
+      }
+    }
 
     const e = new Error(full) as Error & {
       code?: string;

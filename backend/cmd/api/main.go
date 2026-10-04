@@ -91,11 +91,20 @@ func serve() error {
 		logger.Warn("FIELD_ENCRYPTION_KEY not set; supplier bank accounts cannot be stored")
 	}
 
-	kp, err := auth.GenerateKeyPair()
-	if err != nil {
-		return fmt.Errorf("generate signing key: %w", err)
+	var kp *auth.KeyPair
+	if cfg.JWTSigningKey != "" {
+		kp, err = auth.KeyPairFromSeed(cfg.JWTSigningKey)
+		if err != nil {
+			return err
+		}
+		logger.Info("loaded persistent EdDSA signing key", "kid", kp.KID)
+	} else {
+		kp, err = auth.GenerateKeyPair()
+		if err != nil {
+			return fmt.Errorf("generate signing key: %w", err)
+		}
+		logger.Warn("JWT_EDDSA_KEY not set; sessions will not survive restarts", "kid", kp.KID)
 	}
-	logger.Info("generated EdDSA signing key", "kid", kp.KID)
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.APIPort),

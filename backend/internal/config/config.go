@@ -29,6 +29,7 @@ type Config struct {
 	Postgres           Postgres
 	RedisAddr          string
 	FieldEncryptionKey string
+	JWTSigningKey      string
 }
 
 // Load reads configuration from environment variables with dev defaults.
@@ -48,6 +49,7 @@ func Load() Config {
 		},
 		RedisAddr:          getenv("REDIS_ADDR", "localhost:6379"),
 		FieldEncryptionKey: getenv("FIELD_ENCRYPTION_KEY", ""),
+		JWTSigningKey: os.Getenv("JWT_EDDSA_KEY"),
 	}
 }
 
