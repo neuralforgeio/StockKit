@@ -97,6 +97,7 @@ export default function SalesPage() {
     lines: [] as DraftLine[],
   });
   const [submitting, setSubmitting] = useState(false);
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
   // Stable load: dep [] + toastRef => error tampil SEKALI, tidak loop.
   const load = useCallback(async () => {
@@ -273,6 +274,8 @@ export default function SalesPage() {
     so: SalesOrder,
     action: "submit" | "checkout" | "deliver",
   ) => {
+    if (actionInProgress === so.id) return; // prevent double-click
+    setActionInProgress(so.id);
     try {
       let u: SalesOrder;
       let inst: ApprovalInstance | null = null;
@@ -287,22 +290,25 @@ export default function SalesPage() {
         u = await deliverSalesOrder(so.id);
         inst = approval;
       }
+      // Optimistic update
       setItems((p) => p.map((x) => (x.id === so.id ? u : x)));
       setSelected(u);
       if (action === "submit")
-        toastRef.current.success(
+        toast.success(
           `${u.number} submitted`,
           inst?.status === "pending" ? "Awaiting approval." : "Auto-approved.",
         );
       else if (action === "checkout")
-        toastRef.current.success(`${u.number} reserved`, "Stock reserved.");
+        toast.success(`${u.number} reserved`, "Stock reserved.");
       else
-        toastRef.current.success(
+        toast.success(
           `${u.number} delivered`,
           "Stock issued with COGS posted.",
         );
     } catch (err: any) {
-      toastRef.current.error("Action failed", err.message);
+      toast.error("Action failed", err.message);
+    } finally {
+      setActionInProgress(null);
     }
   };
 
@@ -478,8 +484,11 @@ export default function SalesPage() {
                             size="sm"
                             variant="secondary"
                             onClick={() => handleAction(so, "submit")}
+                            disabled={actionInProgress === so.id}
                           >
-                            Submit
+                            {actionInProgress === so.id
+                              ? "Submitting..."
+                              : "Submit"}
                           </Button>
                           <button
                             aria-label={`Delete ${so.number}`}
@@ -514,11 +523,15 @@ export default function SalesPage() {
                             size="sm"
                             variant="secondary"
                             onClick={() => handleAction(so, "checkout")}
-                            disabled={!canCheckout}
+                            disabled={
+                              !canCheckout || actionInProgress === so.id
+                            }
                           >
-                            {approval?.status === "pending"
-                              ? "Pending approval"
-                              : "Checkout"}
+                            {actionInProgress === so.id
+                              ? "Checking out..."
+                              : approval?.status === "pending"
+                                ? "Pending approval"
+                                : "Checkout"}
                           </Button>
                         </>
                       )}
@@ -527,8 +540,11 @@ export default function SalesPage() {
                           size="sm"
                           variant="secondary"
                           onClick={() => handleAction(so, "deliver")}
+                          disabled={actionInProgress === so.id}
                         >
-                          Deliver
+                          {actionInProgress === so.id
+                            ? "Delivering..."
+                            : "Deliver"}
                         </Button>
                       )}
                     </div>
@@ -647,8 +663,11 @@ export default function SalesPage() {
                       size="sm"
                       variant="secondary"
                       onClick={() => handleAction(selected, "submit")}
+                      disabled={actionInProgress === selected.id}
                     >
-                      Submit
+                      {actionInProgress === selected.id
+                        ? "Submitting..."
+                        : "Submit"}
                     </Button>
                     <Button
                       size="sm"
@@ -674,11 +693,15 @@ export default function SalesPage() {
                       size="sm"
                       variant="secondary"
                       onClick={() => handleAction(selected, "checkout")}
-                      disabled={!canCheckout}
+                      disabled={
+                        !canCheckout || actionInProgress === selected.id
+                      }
                     >
-                      {approval?.status === "pending"
-                        ? "Pending approval"
-                        : "Checkout"}
+                      {actionInProgress === selected.id
+                        ? "Checking out..."
+                        : approval?.status === "pending"
+                          ? "Pending approval"
+                          : "Checkout"}
                     </Button>
                   </>
                 )}
@@ -687,8 +710,11 @@ export default function SalesPage() {
                     size="sm"
                     variant="secondary"
                     onClick={() => handleAction(selected, "deliver")}
+                    disabled={actionInProgress === selected.id}
                   >
-                    Deliver
+                    {actionInProgress === selected.id
+                      ? "Delivering..."
+                      : "Deliver"}
                   </Button>
                 )}
               </div>

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -50,6 +51,22 @@ func mapSalesError(err error) error {
 	default:
 		return err
 	}
+}
+
+// writeInternal logs the ROOT cause server-side and returns a rich envelope
+// so failures are visible in: backend log, frontend toast, and DevTools console.
+func (h *Sales) writeInternal(w http.ResponseWriter, r *http.Request, operation string, err error, extra map[string]any) {
+	slog.Error("sales handler failed",
+		"operation", operation,
+		"path", r.URL.Path,
+		"error", err,
+	)
+	wrapped := httperr.New("SALES_"+operation+"_FAILED", http.StatusInternalServerError, err.Error())
+	wrapped.WithDetails("operation", operation)
+	for k, v := range extra {
+		wrapped.WithDetails(k, v)
+	}
+	httperr.Write(w, wrapped)
 }
 
 type salesOrderPayload struct {
@@ -154,9 +171,14 @@ func (h *Sales) Update(w http.ResponseWriter, r *http.Request) {
 			input.Lines[i] = sales.CreateLineInput{ProductID: l.ProductID, Quantity: l.Quantity, UnitPriceMinor: l.UnitPriceMinor}
 		}
 	}
-	so, err := h.svc.Update(r.Context(), claims.TenantID, chi.URLParam(r, "id"), input)
+	id := chi.URLParam(r, "id")
+	so, err := h.svc.Update(r.Context(), claims.TenantID, id, input)
 	if err != nil {
-		httperr.Write(w, mapSalesError(err))
+		if mapped := mapSalesError(err); mapped != err {
+			httperr.Write(w, mapped)
+			return
+		}
+		h.writeInternal(w, r, "UPDATE", err, map[string]any{"sales_order_id": id})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": so})
@@ -168,8 +190,13 @@ func (h *Sales) Delete(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
 		return
 	}
-	if err := h.svc.Delete(r.Context(), claims.TenantID, chi.URLParam(r, "id")); err != nil {
-		httperr.Write(w, mapSalesError(err))
+	id := chi.URLParam(r, "id")
+	if err := h.svc.Delete(r.Context(), claims.TenantID, id); err != nil {
+		if mapped := mapSalesError(err); mapped != err {
+			httperr.Write(w, mapped)
+			return
+		}
+		h.writeInternal(w, r, "DELETE", err, map[string]any{"sales_order_id": id})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -181,18 +208,14 @@ func (h *Sales) Submit(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
 		return
 	}
-		id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "id")
 	so, err := h.svc.Submit(r.Context(), claims.TenantID, claims.Subject, id)
 	if err != nil {
-		// Known domain errors keep their proper status (409 illegal transition, dll).
 		if mapped := mapSalesError(err); mapped != err {
 			httperr.Write(w, mapped)
 			return
 		}
-		// Unknown/internal errors get rich context for observability.
-		wrapped := httperr.New("SUBMIT_FAILED", http.StatusInternalServerError, err.Error())
-		wrapped.WithDetails("operation", "submit_sales_order").WithDetails("sales_order_id", id)
-		httperr.Write(w, wrapped)
+		h.writeInternal(w, r, "SUBMIT", err, map[string]any{"sales_order_id": id})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": so})
@@ -204,9 +227,14 @@ func (h *Sales) Checkout(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
 		return
 	}
-	so, err := h.svc.Checkout(r.Context(), claims.TenantID, chi.URLParam(r, "id"))
+	id := chi.URLParam(r, "id")
+	so, err := h.svc.Checkout(r.Context(), claims.TenantID, id)
 	if err != nil {
-		httperr.Write(w, mapSalesError(err))
+		if mapped := mapSalesError(err); mapped != err {
+			httperr.Write(w, mapped)
+			return
+		}
+		h.writeInternal(w, r, "CHECKOUT", err, map[string]any{"sales_order_id": id})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": so})
@@ -218,9 +246,14 @@ func (h *Sales) Deliver(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
 		return
 	}
-	so, err := h.svc.Deliver(r.Context(), claims.TenantID, chi.URLParam(r, "id"), claims.Subject)
+	id := chi.URLParam(r, "id")
+	so, err := h.svc.Deliver(r.Context(), claims.TenantID, id, claims.Subject)
 	if err != nil {
-		httperr.Write(w, mapSalesError(err))
+		if mapped := mapSalesError(err); mapped != err {
+			httperr.Write(w, mapped)
+			return
+		}
+		h.writeInternal(w, r, "DELIVER", err, map[string]any{"sales_order_id": id})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": so})
@@ -232,9 +265,14 @@ func (h *Sales) Cancel(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
 		return
 	}
-	so, err := h.svc.Cancel(r.Context(), claims.TenantID, chi.URLParam(r, "id"))
+	id := chi.URLParam(r, "id")
+	so, err := h.svc.Cancel(r.Context(), claims.TenantID, id)
 	if err != nil {
-		httperr.Write(w, mapSalesError(err))
+		if mapped := mapSalesError(err); mapped != err {
+			httperr.Write(w, mapped)
+			return
+		}
+		h.writeInternal(w, r, "CANCEL", err, map[string]any{"sales_order_id": id})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": so})

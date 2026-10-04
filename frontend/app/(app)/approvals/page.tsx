@@ -104,6 +104,9 @@ export default function ApprovalsPage() {
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [decideAmount, setDecideAmount] = useState(0);
+  const [pendingDecisions, setPendingDecisions] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Stabilize toast via ref to avoid useEffect re-fire
   const toastRef = useRef(toast);
@@ -176,9 +179,18 @@ export default function ApprovalsPage() {
   const handleDecide = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected) return;
+    const instanceId = selected.id;
+    if (pendingDecisions.has(instanceId)) return; // prevent double-click
+
     setSubmitting(true);
+    setPendingDecisions((prev) => new Set(prev).add(instanceId));
     try {
-      await decideApproval(selected.id, decision, reason.trim());
+      const updated = await decideApproval(instanceId, decision, reason.trim());
+      // Optimistic update: mark as settled immediately before reload
+      setItems((prev) => prev.map((i) => (i.id === instanceId ? updated : i)));
+      if (selected.id === instanceId) {
+        setSelected(updated);
+      }
       toast.success(
         decision === "approved" ? "Approved" : "Rejected",
         decision === "approved"
@@ -191,6 +203,11 @@ export default function ApprovalsPage() {
       toast.error("Decision failed", err.message);
     } finally {
       setSubmitting(false);
+      setPendingDecisions((prev) => {
+        const next = new Set(prev);
+        next.delete(instanceId);
+        return next;
+      });
     }
   };
 
@@ -314,8 +331,14 @@ export default function ApprovalsPage() {
                           size="sm"
                           variant="secondary"
                           onClick={() => openDecide(inst)}
+                          disabled={
+                            pendingDecisions.has(inst.id) ||
+                            inst.status !== "pending"
+                          }
                         >
-                          Decide
+                          {pendingDecisions.has(inst.id)
+                            ? "Processing..."
+                            : "Decide"}
                         </Button>
                       </div>
                     </td>
@@ -411,7 +434,14 @@ export default function ApprovalsPage() {
 
             {selected.status === "pending" && (
               <div className="flex justify-end">
-                <Button onClick={() => openDecide(selected)}>Decide now</Button>
+                <Button
+                  onClick={() => openDecide(selected)}
+                  disabled={pendingDecisions.has(selected.id)}
+                >
+                  {pendingDecisions.has(selected.id)
+                    ? "Processing..."
+                    : "Decide now"}
+                </Button>
               </div>
             )}
           </div>
