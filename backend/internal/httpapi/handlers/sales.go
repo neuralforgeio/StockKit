@@ -105,33 +105,33 @@ func (h *Sales) GetByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Sales) Create(w http.ResponseWriter, r *http.Request) {
-    claims, ok := requestClaims(r)
-    if !ok {
-        httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
-        return
-    }
-    var payload salesOrderPayload
-    if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-        httperr.Write(w, httperr.New("VALIDATION_FAILED", http.StatusUnprocessableEntity, "Invalid request body"))
-        return
-    }
-    lines := make([]sales.CreateLineInput, len(payload.Lines))
-    for i, l := range payload.Lines {
-        lines[i] = sales.CreateLineInput{ProductID: l.ProductID, Quantity: l.Quantity, UnitPriceMinor: l.UnitPriceMinor}
-    }
-    // PATCH: pakai CreateWithCurrency, fallback "IDR" bila kosong
-    currency := payload.Currency
-    if currency == "" {
-        currency = "IDR"
-    }
-    so, err := h.svc.CreateWithCurrency(r.Context(), claims.TenantID, claims.Subject, sales.CreateInput{
-        CustomerID: payload.CustomerID, WarehouseID: payload.WarehouseID, Note: payload.Note, Lines: lines,
-    }, currency)
-    if err != nil {
-        httperr.Write(w, mapSalesError(err))
-        return
-    }
-    writeJSON(w, http.StatusCreated, map[string]any{"data": so})
+	claims, ok := requestClaims(r)
+	if !ok {
+		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
+		return
+	}
+	var payload salesOrderPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		httperr.Write(w, httperr.New("VALIDATION_FAILED", http.StatusUnprocessableEntity, "Invalid request body"))
+		return
+	}
+	lines := make([]sales.CreateLineInput, len(payload.Lines))
+	for i, l := range payload.Lines {
+		lines[i] = sales.CreateLineInput{ProductID: l.ProductID, Quantity: l.Quantity, UnitPriceMinor: l.UnitPriceMinor}
+	}
+	// PATCH: pakai CreateWithCurrency, fallback "IDR" bila kosong
+	currency := payload.Currency
+	if currency == "" {
+		currency = "IDR"
+	}
+	so, err := h.svc.CreateWithCurrency(r.Context(), claims.TenantID, claims.Subject, sales.CreateInput{
+		CustomerID: payload.CustomerID, WarehouseID: payload.WarehouseID, Note: payload.Note, Lines: lines,
+	}, currency)
+	if err != nil {
+		httperr.Write(w, mapSalesError(err))
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"data": so})
 }
 
 // Update handles PATCH /api/v1/sales-orders/{id}. Only draft SOs can be edited.
@@ -240,6 +240,7 @@ type customerInvoicePayload struct {
 	SalesOrderID *string `json:"sales_order_id"`
 	DueDate      *string `json:"due_date"`
 	Note         string  `json:"note"`
+	Currency     string  `json:"currency"`
 	Lines        []struct {
 		SalesOrderLineID *string `json:"sales_order_line_id"`
 		ProductID        string  `json:"product_id"`
@@ -283,7 +284,7 @@ func (h *Sales) CreateCustomerInvoice(w http.ResponseWriter, r *http.Request) {
 	inv, err := h.svc.CreateCustomerInvoice(r.Context(), claims.TenantID, claims.Subject, sales.CreateCustomerInvoiceInput{
 		CustomerID: payload.CustomerID, SalesOrderID: payload.SalesOrderID,
 		DueDate: payload.DueDate, Note: payload.Note, Lines: lines,
-	})
+	}, payload.Currency)
 	if err != nil {
 		httperr.Write(w, mapSalesError(err))
 		return

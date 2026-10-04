@@ -27,6 +27,8 @@ type ListFilter struct {
 	EntityID   string
 	ActorID    string
 	EventType  string
+	From       *time.Time
+	To         *time.Time
 	Limit      int
 	Offset     int
 }
@@ -43,27 +45,37 @@ func (r *Repository) List(ctx context.Context, tenantID string, f ListFilter) ([
 		FROM audit_logs
 		WHERE tenant_id = $1`
 	args := []any{tenantID}
-	argIdx := 2
+	idx := 2
 
 	if f.EntityType != "" {
-		query += fmt.Sprintf(" AND entity_type = $%d", argIdx)
+		query += fmt.Sprintf(" AND entity_type = $%d", idx)
 		args = append(args, f.EntityType)
-		argIdx++
+		idx++
 	}
 	if f.EntityID != "" {
-		query += fmt.Sprintf(" AND entity_id = $%d", argIdx)
+		query += fmt.Sprintf(" AND entity_id = $%d", idx)
 		args = append(args, f.EntityID)
-		argIdx++
+		idx++
 	}
 	if f.ActorID != "" {
-		query += fmt.Sprintf(" AND actor_user_id = $%d", argIdx)
+		query += fmt.Sprintf(" AND actor_user_id = $%d", idx)
 		args = append(args, f.ActorID)
-		argIdx++
+		idx++
 	}
 	if f.EventType != "" {
-		query += fmt.Sprintf(" AND event_type = $%d", argIdx)
+		query += fmt.Sprintf(" AND event_type = $%d", idx)
 		args = append(args, f.EventType)
-		argIdx++
+		idx++
+	}
+	if f.From != nil {
+		query += fmt.Sprintf(" AND created_at >= $%d", idx)
+		args = append(args, *f.From)
+		idx++
+	}
+	if f.To != nil {
+		query += fmt.Sprintf(" AND created_at <= $%d", idx)
+		args = append(args, *f.To)
+		idx++
 	}
 
 	query += " ORDER BY created_at DESC"
@@ -72,12 +84,11 @@ func (r *Repository) List(ctx context.Context, tenantID string, f ListFilter) ([
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	query += fmt.Sprintf(" LIMIT $%d", argIdx)
+	query += fmt.Sprintf(" LIMIT $%d", idx)
 	args = append(args, limit)
-	argIdx++
-
+	idx++
 	if f.Offset > 0 {
-		query += fmt.Sprintf(" OFFSET $%d", argIdx)
+		query += fmt.Sprintf(" OFFSET $%d", idx)
 		args = append(args, f.Offset)
 	}
 
@@ -89,16 +100,16 @@ func (r *Repository) List(ctx context.Context, tenantID string, f ListFilter) ([
 
 	out := []Log{}
 	for rows.Next() {
-		var log Log
+		var l Log
 		var oldStr, newStr, metaStr string
-		if err := rows.Scan(&log.ID, &log.TenantID, &log.ActorUserID, &log.EventType,
-			&log.EntityType, &log.EntityID, &oldStr, &newStr, &metaStr, &log.CreatedAt); err != nil {
+		if err := rows.Scan(&l.ID, &l.TenantID, &l.ActorUserID, &l.EventType, &l.EntityType,
+			&l.EntityID, &oldStr, &newStr, &metaStr, &l.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan audit log: %w", err)
 		}
-		log.OldData = json.RawMessage(oldStr)
-		log.NewData = json.RawMessage(newStr)
-		log.Metadata = json.RawMessage(metaStr)
-		out = append(out, log)
+		l.OldData = json.RawMessage(oldStr)
+		l.NewData = json.RawMessage(newStr)
+		l.Metadata = json.RawMessage(metaStr)
+		out = append(out, l)
 	}
 	return out, rows.Err()
 }

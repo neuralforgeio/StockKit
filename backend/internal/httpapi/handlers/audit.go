@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/neuralforgeio/StockKit/internal/audit"
 	"github.com/neuralforgeio/StockKit/internal/httpapi/httperr"
@@ -27,15 +28,29 @@ func (h *Audit) List(w http.ResponseWriter, r *http.Request) {
 		ActorID:    r.URL.Query().Get("actor_id"),
 		EventType:  r.URL.Query().Get("event_type"),
 	}
-
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil {
-			filter.Limit = l
+	if v := r.URL.Query().Get("from"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			filter.From = &t
+		} else if t, err := time.Parse("2006-01-02", v); err == nil {
+			filter.From = &t
 		}
 	}
-	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
-		if o, err := strconv.Atoi(offsetStr); err == nil {
-			filter.Offset = o
+	if v := r.URL.Query().Get("to"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			filter.To = &t
+		} else if t, err := time.Parse("2006-01-02", v); err == nil {
+			end := t.Add(24*time.Hour - time.Second)
+			filter.To = &end
+		}
+	}
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil {
+			filter.Limit = n
+		}
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil {
+			filter.Offset = n
 		}
 	}
 
@@ -44,7 +59,6 @@ func (h *Audit) List(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, err)
 		return
 	}
-
 	total, _ := h.repo.Count(r.Context(), claims.TenantID)
 
 	writeJSON(w, http.StatusOK, map[string]any{

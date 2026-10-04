@@ -870,6 +870,51 @@ func (r *Repository) CreateCustomerInvoice(ctx context.Context, tenantID, actorI
 	return r.GetCustomerInvoice(ctx, tenantID, invID)
 }
 
+// CreateCustomerInvoiceWithCurrency stores currency + exchange_rate + base_amount_minor.
+func (r *Repository) CreateCustomerInvoiceWithCurrency(ctx context.Context, tenantID, actorID string, input CreateCustomerInvoiceInput, currency string, exchangeRate float64, baseAmountMinor int64) (*CustomerInvoice, error) {
+	var invID string
+	err := pg.WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+		number, err := r.codes.Next(ctx, tx, tenantID, "CINV")
+		if err != nil {
+			return err
+		}
+		total := int64(0)
+		for _, l := range input.Lines {
+			total += l.QtyInvoiced * l.UnitPriceMinor
+		}
+		err = tx.QueryRow(ctx, `
+			INSERT INTO customer_invoices (
+				tenant_id, number, customer_id, sales_order_id, due_date, status,
+				total_minor, paid_minor, note, created_by, currency, exchange_rate, base_amount_minor
+			) VALUES ($1, $2, $3, $4, $5, 'open', $6, 0, $7, $8, $9, $10, $11)
+			RETURNING id`,
+			tenantID, number, input.CustomerID, input.SalesOrderID, input.DueDate,
+			total, input.Note, actorID, currency, exchangeRate, baseAmountMinor).Scan(&invID)
+		if err != nil {
+			return fmt.Errorf("insert customer invoice: %w", err)
+		}
+		for _, l := range input.Lines {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO customer_invoice_lines (
+					tenant_id, invoice_id, sales_order_line_id, product_id, qty_invoiced, unit_price_minor
+				) VALUES ($1, $2, $3, $4, $5, $6)`,
+				tenantID, invID, l.SalesOrderLineID, l.ProductID, l.QtyInvoiced, l.UnitPriceMinor); err != nil {
+				return fmt.Errorf("insert customer invoice line: %w", err)
+			}
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE customers SET open_exposure_minor = open_exposure_minor + $1, updated_at = now()
+			WHERE id = $2 AND tenant_id = $3`, baseAmountMinor, input.CustomerID, tenantID); err != nil {
+			return fmt.Errorf("bump customer exposure: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.GetCustomerInvoice(ctx, tenantID, invID)
+}
+
 func (r *Repository) GetCustomerInvoice(ctx context.Context, tenantID, id string) (*CustomerInvoice, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT `+ciColumns+`

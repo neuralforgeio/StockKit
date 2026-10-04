@@ -26,6 +26,7 @@ import (
 	"github.com/neuralforgeio/StockKit/internal/notify"
 	"github.com/neuralforgeio/StockKit/internal/products"
 	"github.com/neuralforgeio/StockKit/internal/purchasing"
+	"github.com/neuralforgeio/StockKit/internal/realtime"
 	"github.com/neuralforgeio/StockKit/internal/sales"
 	"github.com/neuralforgeio/StockKit/internal/suppliers"
 	"github.com/neuralforgeio/StockKit/internal/units"
@@ -64,6 +65,11 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 	inventoryH := handlers.NewInventory(inventorySvc)
 
 	notifySvc := notify.New(pool)
+
+	// Realtime hub: server-side 2s poll, client push via WebSocket.
+	rtHub := realtime.NewHub(pool)
+	go rtHub.Run(context.Background())
+	wsH := handlers.NewNotificationsWS(rtHub)
 
 	approvalRepo := approval.NewRepository(pool)
 
@@ -151,6 +157,7 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 				r.Get("/unread-count", notificationsH.UnreadCount)
 				r.Post("/read-all", notificationsH.MarkAll)
 				r.Post("/{id}/read", notificationsH.MarkRead)
+				r.Get("/ws", wsH.ServeWS)
 			})
 
 			r.Route("/approval-rules", func(r chi.Router) {

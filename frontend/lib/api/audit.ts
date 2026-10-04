@@ -18,6 +18,8 @@ export type AuditFilter = {
   entity_id?: string;
   actor_id?: string;
   event_type?: string;
+  from?: string;
+  to?: string;
   limit?: number;
   offset?: number;
 };
@@ -30,6 +32,8 @@ export async function listAuditLogs(
   if (filter.entity_id) params.set("entity_id", filter.entity_id);
   if (filter.actor_id) params.set("actor_id", filter.actor_id);
   if (filter.event_type) params.set("event_type", filter.event_type);
+  if (filter.from) params.set("from", filter.from);
+  if (filter.to) params.set("to", filter.to);
   if (filter.limit) params.set("limit", String(filter.limit));
   if (filter.offset) params.set("offset", String(filter.offset));
   const qs = params.toString();

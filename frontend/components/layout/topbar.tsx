@@ -10,6 +10,7 @@ import {
   markNotificationRead,
   type AppNotification,
 } from "@/lib/api/notifications";
+import { realtime } from "@/lib/realtime";
 
 const KIND_ICON: Record<string, string> = {
   approval_requested:
@@ -43,9 +44,14 @@ export function Topbar() {
   }, []);
 
   useEffect(() => {
+    realtime.connect();
     refreshCount();
-    const t = setInterval(refreshCount, 30000);
-    return () => clearInterval(t);
+    const t = setInterval(refreshCount, 60000); // fallback only
+    const off = realtime.on(() => refreshCount());
+    return () => {
+      clearInterval(t);
+      off();
+    };
   }, [refreshCount]);
 
   useEffect(() => {

@@ -3,6 +3,8 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -10,8 +12,43 @@ import (
 	"github.com/neuralforgeio/StockKit/internal/httpapi/httperr"
 )
 
-// GetClaims retrieves JWT claims from request context (set by AuthN middleware).
-// Returns nil if claims are missing or invalid.
+// roleCacheEntry holds cached roles with a TTL.
+type roleCacheEntry struct {
+	roles     []string
+	expiresAt time.Time
+}
+
+// roleCache is a simple in-memory TTL cache keyed by tenant|user.
+type roleCache struct {
+	mu      sync.RWMutex
+	entries map[string]roleCacheEntry
+	ttl     time.Duration
+}
+
+func newRoleCache(ttl time.Duration) *roleCache {
+	return &roleCache{entries: make(map[string]roleCacheEntry), ttl: ttl}
+}
+
+func (c *roleCache) get(key string) ([]string, bool) {
+	c.mu.RLock()
+	e, ok := c.entries[key]
+	c.mu.RUnlock()
+	if !ok || time.Now().After(e.expiresAt) {
+		return nil, false
+	}
+	return e.roles, true
+}
+
+func (c *roleCache) set(key string, roles []string) {
+	c.mu.Lock()
+	c.entries[key] = roleCacheEntry{roles: roles, expiresAt: time.Now().Add(c.ttl)}
+	c.mu.Unlock()
+}
+
+// shared cache (5m TTL) across all RequireRole middleware instances.
+var sharedRoleCache = newRoleCache(5 * time.Minute)
+
+// GetClaims retrieves JWT claims from request context (set by AuthN).
 func GetClaims(r *http.Request) *auth.Claims {
 	v := r.Context().Value(ClaimsKey)
 	if v == nil {
@@ -24,9 +61,8 @@ func GetClaims(r *http.Request) *auth.Claims {
 	return c
 }
 
-// RequireRole returns middleware that enforces the user holds at least one of the given roles.
-// Roles are resolved by querying user_roles table for the authenticated user.
-// "developer" role implicitly bypasses all role checks (full access for dev tools).
+// RequireRole enforces the user holds at least one of the given roles.
+// "developer" implicitly bypasses all checks. Roles cached 5m per user.
 func RequireRole(pool *pgxpool.Pool, roles ...string) func(http.Handler) http.Handler {
 	roleSet := make(map[string]struct{}, len(roles))
 	for _, r := range roles {
@@ -39,12 +75,17 @@ func RequireRole(pool *pgxpool.Pool, roles ...string) func(http.Handler) http.Ha
 				httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
 				return
 			}
-			userRoles, err := queryUserRoles(r.Context(), pool, claims.Subject, claims.TenantID)
-			if err != nil {
-				httperr.Write(w, httperr.New("INTERNAL", http.StatusInternalServerError, "Failed to resolve roles"))
-				return
+			cacheKey := claims.TenantID + "|" + claims.Subject
+			userRoles, ok := sharedRoleCache.get(cacheKey)
+			if !ok {
+				var err error
+				userRoles, err = queryUserRoles(r.Context(), pool, claims.Subject, claims.TenantID)
+				if err != nil {
+					httperr.Write(w, httperr.New("INTERNAL", http.StatusInternalServerError, "Failed to resolve roles"))
+					return
+				}
+				sharedRoleCache.set(cacheKey, userRoles)
 			}
-			// Developer always has full access (bypass)
 			for _, ur := range userRoles {
 				if ur == "developer" {
 					next.ServeHTTP(w, r)
@@ -52,7 +93,7 @@ func RequireRole(pool *pgxpool.Pool, roles ...string) func(http.Handler) http.Ha
 				}
 			}
 			for _, ur := range userRoles {
-				if _, ok := roleSet[ur]; ok {
+				if _, hit := roleSet[ur]; hit {
 					next.ServeHTTP(w, r)
 					return
 				}

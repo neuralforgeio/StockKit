@@ -213,3 +213,59 @@ func (s *Service) RecordCustomerReceipt(ctx context.Context, tenantID, actorID s
 	}
 	return s.repo.RecordCustomerReceipt(ctx, tenantID, actorID, input)
 }
+
+// CreateCustomerInvoiceWithCurrency converts to base IDR via FX when currency != IDR.
+func (s *Service) CreateCustomerInvoiceWithCurrency(ctx context.Context, tenantID, actorID string, input CreateCustomerInvoiceInput, currency string) (*CustomerInvoice, error) {
+	if input.CustomerID == "" {
+		return nil, ErrCustomerRequired
+	}
+	if len(input.Lines) == 0 {
+		return nil, ErrLinesRequired
+	}
+	total := int64(0)
+	for _, l := range input.Lines {
+		if l.ProductID == "" || l.QtyInvoiced <= 0 {
+			return nil, ErrQtyInvalid
+		}
+		total += l.QtyInvoiced * l.UnitPriceMinor
+	}
+	if currency == "" {
+		currency = "IDR"
+	}
+	var baseAmountMinor int64
+	var rate float64 = 1.0
+	if currency != "IDR" && s.fx != nil {
+		var err error
+		baseAmountMinor, rate, err = s.fx.ConvertToBase(ctx, tenantID, total, currency, "IDR")
+		if err != nil {
+			return nil, fmt.Errorf("convert currency: %w", err)
+		}
+	} else {
+		baseAmountMinor = total
+	}
+	return s.repo.CreateCustomerInvoiceWithCurrency(ctx, tenantID, actorID, input, currency, rate, baseAmountMinor)
+}
+
+// RecordCustomerReceiptWithCurrency converts a foreign-currency payment to base IDR.
+func (s *Service) RecordCustomerReceiptWithCurrency(ctx context.Context, tenantID, actorID string, input RecordReceiptInput, currency string) (*CustomerReceipt, error) {
+	if input.CustomerInvoiceID == "" || input.CashAccountID == "" {
+		return nil, ErrQtyInvalid
+	}
+	if input.AmountMinor <= 0 {
+		return nil, ErrQtyInvalid
+	}
+	if currency == "" {
+		currency = "IDR"
+	}
+	if currency != "IDR" && s.fx != nil {
+		converted, _, err := s.fx.ConvertToBase(ctx, tenantID, input.AmountMinor, currency, "IDR")
+		if err != nil {
+			return nil, fmt.Errorf("convert currency: %w", err)
+		}
+		input.AmountMinor = converted
+	}
+	if input.PaymentMethod == "" {
+		input.PaymentMethod = "transfer"
+	}
+	return s.repo.RecordCustomerReceipt(ctx, tenantID, actorID, input)
+}

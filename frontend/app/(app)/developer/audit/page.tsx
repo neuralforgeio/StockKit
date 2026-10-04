@@ -71,6 +71,8 @@ export default function AuditLogsPage() {
   const [filter, setFilter] = useState<AuditFilter>({
     entity_type: "",
     event_type: "",
+    from: "",
+    to: "",
     limit: 100,
     offset: 0,
   });
