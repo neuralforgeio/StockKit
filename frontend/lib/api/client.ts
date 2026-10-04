@@ -34,6 +34,12 @@ function withCsrf(init?: RequestInit): RequestInit {
   return { ...init, headers };
 }
 
+export type ApiErrorShape = {
+  code?: string;
+  message?: string;
+  details?: Record<string, any>;
+};
+
 export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
@@ -58,23 +64,43 @@ export async function apiFetch<T>(
   }
 
   const body = (await res.json().catch(() => null)) as T | null;
+
   if (!res.ok) {
-    const err = (
-      body as {
-        error?: {
-          code?: string;
-          message?: string;
-          details?: Record<string, any>;
-        };
-      } | null
-    )?.error;
-    const apiErr = new Error(err?.message ?? "Request failed") as Error & {
+    const env = (body as { error?: ApiErrorShape } | null)?.error;
+    const code = env?.code ?? `HTTP_${res.status}`;
+    const baseMsg = env?.message ?? "Request failed";
+
+    // Human-readable single line: [CODE] message — k=v, k=v
+    let full = `[${code}] ${baseMsg}`;
+    if (env?.details && Object.keys(env.details).length > 0) {
+      const kv = Object.entries(env.details)
+        .map(
+          ([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`,
+        )
+        .join(", ");
+      full += ` — ${kv}`;
+    }
+
+    // Full visibility in DevTools console.
+    // eslint-disable-next-line no-console
+    console.error("[api]", {
+      status: res.status,
+      path,
+      code,
+      message: baseMsg,
+      details: env?.details ?? null,
+    });
+
+    const e = new Error(full) as Error & {
       code?: string;
       details?: Record<string, any>;
+      status?: number;
     };
-    apiErr.code = err?.code;
-    apiErr.details = err?.details;
-    throw apiErr;
+    e.code = code;
+    e.details = env?.details;
+    e.status = res.status;
+    throw e;
   }
+
   return body as T;
 }

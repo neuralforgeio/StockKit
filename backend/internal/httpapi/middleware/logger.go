@@ -1,9 +1,12 @@
 package middleware
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -27,23 +30,58 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// bodyCaptureWriter wraps a ResponseWriter and captures the response body (up to 4KB)
-// so we can extract error codes from JSON envelopes for 5xx log visibility.
+const maxCapture = 4096
+
+var errNoHijack = errors.New("upstream ResponseWriter does not implement http.Hijacker")
+
+// bodyCaptureWriter captures response body (bounded) AND forwards Hijack/Flush
+// so WebSocket upgrades and streaming keep working through the logger.
 type bodyCaptureWriter struct {
 	http.ResponseWriter
 	buf *bytes.Buffer
 }
 
 func (b *bodyCaptureWriter) Write(p []byte) (int, error) {
-	if b.buf != nil && b.buf.Len() < 4096 {
+	if b.buf != nil && b.buf.Len() < maxCapture {
 		b.buf.Write(p)
 	}
 	return b.ResponseWriter.Write(p)
 }
 
-// ColoredLogger emits a colored, structured request log with required fields:
-// timestamp, level, message, log_id, user_id, ip, url, status, duration, request_id.
-// For 5xx responses, also extracts error_code from JSON envelope body.
+// Hijack delegates to the underlying writer (required by gorilla websocket).
+func (b *bodyCaptureWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := b.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errNoHijack
+	}
+	return hj.Hijack()
+}
+
+// Flush delegates for streaming/SSE responses.
+func (b *bodyCaptureWriter) Flush() {
+	if f, ok := b.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+type errEnvelope struct {
+	Error struct {
+		Code    string         `json:"code"`
+		Message string         `json:"message"`
+		Details map[string]any `json:"details"`
+	} `json:"error"`
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+// ColoredLogger emits a colored, structured request log. For 4xx/5xx it also
+// extracts code/message/details from the JSON error envelope so failures are
+// fully diagnosable from server logs alone.
 func ColoredLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	_ = logger
 	reqLogger := slog.New(logging.NewConsoleHandler(slog.LevelInfo))
@@ -53,44 +91,41 @@ func ColoredLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			start := time.Now()
 			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 
-			// Wrap ww with a body capture writer so we can inspect 5xx bodies.
 			var bodyBuf bytes.Buffer
 			capture := &bodyCaptureWriter{ResponseWriter: ww, buf: &bodyBuf}
 
 			next.ServeHTTP(capture, r)
 
 			level := slog.LevelInfo
-			var errorCode string
 			if ww.Status() >= 500 {
 				level = slog.LevelError
-				// Try to extract error code from JSON envelope
-				if bodyBuf.Len() > 0 {
-					var envelope struct {
-						Error struct {
-							Code string `json:"code"`
-						} `json:"error"`
-					}
-					if err := json.Unmarshal(bodyBuf.Bytes(), &envelope); err == nil && envelope.Error.Code != "" {
-						errorCode = envelope.Error.Code
-					}
-				}
 			} else if ww.Status() >= 400 {
 				level = slog.LevelWarn
 			}
 
-			userID := ww.Header().Get("X-User-ID")
-
 			args := []any{
 				"log_id", logging.NewLogID(),
-				"user_id", userID,
+				"user_id", ww.Header().Get("X-User-ID"),
 				"ip", clientIP(r),
 				"url", r.Method + " " + r.URL.Path,
 				"status", ww.Status(),
 				"duration_ms", time.Since(start).Milliseconds(),
 				"request_id", chimw.GetReqID(r.Context()),
 			}
-			if errorCode != "" {
-				args = append(args, "error_code", errorCode)
+
+			if ww.Status() >= 400 && bodyBuf.Len() > 0 {
+				var env errEnvelope
+				if err := json.Unmarshal(bodyBuf.Bytes(), &env); err == nil && env.Error.Code != "" {
+					args = append(args, "error_code", env.Error.Code)
+					if env.Error.Message != "" {
+						args = append(args, "error_message", truncate(env.Error.Message, 300))
+					}
+					if len(env.Error.Details) > 0 {
+						if dj, err := json.Marshal(env.Error.Details); err == nil {
+							args = append(args, "error_details", truncate(string(dj), 300))
+						}
+					}
+				}
 			}
 
 			reqLogger.Log(r.Context(), level, "http request", args...)

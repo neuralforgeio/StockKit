@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"github.com/neuralforgeio/StockKit/internal/httpapi/httperr"
 	"github.com/neuralforgeio/StockKit/internal/realtime"
 )
 
@@ -27,11 +29,14 @@ func NewNotificationsWS(hub *realtime.Hub) *NotificationsWS {
 func (h *NotificationsWS) ServeWS(w http.ResponseWriter, r *http.Request) {
 	claims, ok := requestClaims(r)
 	if !ok {
-		http.Error(w, `{"code":"AUTH_FAILED","message":"Missing claims"}`, http.StatusUnauthorized)
+		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
 		return
 	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		// Visible in backend logs instead of a silent 500.
+		slog.Warn("websocket upgrade failed", "error", err, "path", r.URL.Path)
 		return
 	}
 	defer conn.Close()
@@ -39,18 +44,46 @@ func (h *NotificationsWS) ServeWS(w http.ResponseWriter, r *http.Request) {
 	sink := h.hub.Attach(claims.TenantID, claims.Subject)
 	defer h.hub.Detach(claims.TenantID, claims.Subject, sink)
 
-	// writer: push events to client
+	done := make(chan struct{})
+	defer close(done)
+
+	// Writer: push hub events to the client.
 	go func() {
-		for ev := range sink.Ch {
-			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if err := conn.WriteJSON(ev); err != nil {
-				conn.Close()
+		for {
+			select {
+			case ev, open := <-sink.Ch:
+				if !open {
+					return
+				}
+				conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				if err := conn.WriteJSON(ev); err != nil {
+					conn.Close()
+					return
+				}
+			case <-done:
 				return
 			}
 		}
 	}()
 
-	// reader: keepalive + detect close
+	// Pinger: WriteControl is safe to call concurrently with the writer goroutine.
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				deadline := time.Now().Add(5 * time.Second)
+				if err := conn.WriteControl(websocket.PingMessage, nil, deadline); err != nil {
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	// Reader: keepalive bookkeeping + close detection.
 	conn.SetReadLimit(512)
 	conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 	conn.SetPongHandler(func(string) error {
