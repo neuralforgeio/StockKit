@@ -119,3 +119,38 @@ func (r *Repository) Count(ctx context.Context, tenantID string) (int, error) {
 	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs WHERE tenant_id = $1`, tenantID).Scan(&count)
 	return count, err
 }
+
+// Export retrieves audit logs within a date range for CSV/JSON export.
+// Limit default 10_000 rows untuk mencegah OOM di production.
+func (r *Repository) Export(ctx context.Context, tenantID string, from, to time.Time, limit int) ([]Log, error) {
+	if limit <= 0 || limit > 50000 {
+		limit = 10000
+	}
+	query := `
+		SELECT id, tenant_id, actor_user_id, event_type, entity_type, entity_id,
+		       COALESCE(old_data::text, 'null'), COALESCE(new_data::text, 'null'),
+		       COALESCE(metadata::text, 'null'), created_at
+		FROM audit_logs
+		WHERE tenant_id = $1 AND created_at >= $2 AND created_at <= $3
+		ORDER BY created_at DESC
+		LIMIT $4`
+	rows, err := r.pool.Query(ctx, query, tenantID, from, to, limit)
+	if err != nil {
+		return nil, fmt.Errorf("export audit logs: %w", err)
+	}
+	defer rows.Close()
+	out := []Log{}
+	for rows.Next() {
+		var l Log
+		var oldStr, newStr, metaStr string
+		if err := rows.Scan(&l.ID, &l.TenantID, &l.ActorUserID, &l.EventType, &l.EntityType,
+			&l.EntityID, &oldStr, &newStr, &metaStr, &l.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan audit log: %w", err)
+		}
+		l.OldData = json.RawMessage(oldStr)
+		l.NewData = json.RawMessage(newStr)
+		l.Metadata = json.RawMessage(metaStr)
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}

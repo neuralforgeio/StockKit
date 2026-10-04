@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/csv"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -69,4 +71,64 @@ func (h *Audit) List(w http.ResponseWriter, r *http.Request) {
 			"offset": filter.Offset,
 		},
 	})
+}
+
+// Export handles GET /api/v1/audit-logs/export?format=csv|json&from=2026-01-01&to=2026-12-31
+func (h *Audit) Export(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requestClaims(r)
+	if !ok {
+		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
+		return
+	}
+
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "csv"
+	}
+	fromStr := r.URL.Query().Get("from")
+	toStr := r.URL.Query().Get("to")
+
+	from := time.Now().AddDate(0, -1, 0) // default: 1 bulan terakhir
+	to := time.Now()
+	if fromStr != "" {
+		if t, err := time.Parse("2006-01-02", fromStr); err == nil {
+			from = t
+		}
+	}
+	if toStr != "" {
+		if t, err := time.Parse("2006-01-02", toStr); err == nil {
+			to = t.Add(24*time.Hour - time.Second) // include end of day
+		}
+	}
+
+	logs, err := h.repo.Export(r.Context(), claims.TenantID, from, to, 10000)
+	if err != nil {
+		httperr.Write(w, httperr.Wrap("EXPORT_FAILED", http.StatusInternalServerError, "Failed to export audit logs", err))
+		return
+	}
+
+	switch format {
+	case "json":
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", "attachment; filename=audit-logs.json")
+		writeJSON(w, http.StatusOK, map[string]any{"data": logs})
+	default: // csv
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=audit-logs-%s.csv", time.Now().Format("20060102")))
+		cw := csv.NewWriter(w)
+		_ = cw.Write([]string{"id", "created_at", "event_type", "entity_type", "entity_id", "old_data", "new_data", "metadata"})
+		for _, l := range logs {
+			_ = cw.Write([]string{
+				fmt.Sprintf("%d", l.ID),
+				l.CreatedAt.Format(time.RFC3339),
+				l.EventType,
+				l.EntityType,
+				l.EntityID,
+				string(l.OldData),
+				string(l.NewData),
+				string(l.Metadata),
+			})
+		}
+		cw.Flush()
+	}
 }

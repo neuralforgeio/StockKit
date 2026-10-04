@@ -30,14 +30,19 @@ type Config struct {
 	RedisAddr          string
 	FieldEncryptionKey string
 	JWTSigningKey      string
+	DebugMode          bool
 }
 
 // Load reads configuration from environment variables with dev defaults.
 func Load() Config {
 	_ = godotenv.Load("../.env")
 	_ = godotenv.Load(".env")
+
+	env := getenv("STOCKKIT_ENV", "development")
+	debugMode := (env == "development" || env == "dev")
+
 	return Config{
-		Env:     getenv("STOCKKIT_ENV", "development"),
+		Env:     env,
 		APIPort: getenvInt("API_PORT", 8080),
 		Postgres: Postgres{
 			Host:     getenv("POSTGRES_HOST", "localhost"),
@@ -49,7 +54,8 @@ func Load() Config {
 		},
 		RedisAddr:          getenv("REDIS_ADDR", "localhost:6379"),
 		FieldEncryptionKey: getenv("FIELD_ENCRYPTION_KEY", ""),
-		JWTSigningKey: os.Getenv("JWT_EDDSA_KEY"),
+		JWTSigningKey:      os.Getenv("JWT_EDDSA_KEY"),
+		DebugMode:          debugMode,
 	}
 }
 

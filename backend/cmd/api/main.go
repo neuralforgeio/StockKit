@@ -18,12 +18,15 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	pgmigrate "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 
 	"github.com/neuralforgeio/StockKit/internal/auth"
 	"github.com/neuralforgeio/StockKit/internal/config"
 	fieldcipher "github.com/neuralforgeio/StockKit/internal/crypto"
 	"github.com/neuralforgeio/StockKit/internal/httpapi"
+	"github.com/neuralforgeio/StockKit/internal/httpapi/httperr"
+	"github.com/neuralforgeio/StockKit/internal/httpapi/middleware"
 	"github.com/neuralforgeio/StockKit/internal/logging"
 	"github.com/neuralforgeio/StockKit/internal/platform/version"
 	"github.com/neuralforgeio/StockKit/internal/store/pg"
@@ -60,6 +63,9 @@ func run(args []string) error {
 }
 
 func serve() error {
+	// Load .env dari backend/.env (godotenv aman bila file tidak ada)
+	_ = godotenv.Load()
+
 	logger := logging.NewLogger(slog.LevelInfo, "./logs")
 	cfg := config.Load()
 
@@ -103,7 +109,20 @@ func serve() error {
 		if err != nil {
 			return fmt.Errorf("generate signing key: %w", err)
 		}
-		logger.Warn("JWT_EDDSA_KEY not set; sessions will not survive restarts", "kid", kp.KID)
+		if cfg.DebugMode {
+			logger.Warn("JWT_EDDSA_KEY not set; sessions will not survive restarts", "kid", kp.KID)
+		} else {
+			logger.Info("generated EdDSA signing key", "kid", kp.KID)
+		}
+	}
+
+	// Wire debug mode ke error handler dan logger
+	httperr.SetDebugMode(cfg.DebugMode)
+	middleware.SetDebugMode(cfg.DebugMode)
+	if cfg.DebugMode {
+		logger.Warn("DEBUG MODE ACTIVE: stack traces & raw errors exposed to clients", "env", cfg.Env)
+	} else {
+		logger.Info("production mode: errors sanitized for end users")
 	}
 
 	srv := &http.Server{
@@ -140,6 +159,9 @@ func serve() error {
 }
 
 func migrateCmd(args []string) error {
+	// Load .env dari backend/.env
+	_ = godotenv.Load()
+
 	sub := "up"
 	if len(args) > 0 {
 		sub = args[0]
@@ -227,6 +249,9 @@ func randomPassword(n int) string {
 }
 
 func seedCmd() error {
+	// Load .env dari backend/.env
+	_ = godotenv.Load()
+
 	cfg := config.Load()
 	ctx := context.Background()
 	pool, err := pg.NewPool(ctx, cfg.Postgres.DSN())

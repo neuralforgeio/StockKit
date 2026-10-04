@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -15,6 +16,13 @@ import (
 
 	"github.com/neuralforgeio/StockKit/internal/logging"
 )
+
+var debugMode bool
+
+// SetDebugMode mengaktifkan stack trace logging untuk 5xx errors.
+func SetDebugMode(enabled bool) {
+	debugMode = enabled
+}
 
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
@@ -126,6 +134,13 @@ func ColoredLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 						}
 					}
 				}
+			}
+
+			// DEBUG: log stack trace untuk 5xx saat debug mode aktif
+			if debugMode && ww.Status() >= 500 {
+				buf := make([]byte, 4096)
+				n := runtime.Stack(buf, false)
+				args = append(args, "stack", string(buf[:n]))
 			}
 
 			reqLogger.Log(r.Context(), level, "http request", args...)
