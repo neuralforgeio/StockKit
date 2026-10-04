@@ -46,7 +46,7 @@ export default function AuditLogsPage() {
       if (filter.to) params.set("to", filter.to);
       params.set("limit", "500");
       const res = await apiFetch<{ data: AuditLog[]; pagination: any }>(
-        `/audit-logs?${params.toString()}`
+        `/audit-logs?${params.toString()}`,
       );
       setLogs(res.data ?? []);
     } catch (err: any) {
@@ -58,7 +58,33 @@ export default function AuditLogsPage() {
   }, [filter.from, filter.to, filter.entityType]);
 
   useEffect(() => {
-    load();
+    // Subscribe WebSocket for real-time audit notifications
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/api/v1/audit-logs/ws`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "audit_event") {
+          // Auto-refresh table saat ada event baru
+          load();
+        }
+      } catch {
+        /* ignore parse errors */
+      }
+    };
+
+    ws.onclose = () => {
+      // Auto-reconnect setelah 3 detik
+      setTimeout(() => {
+        window.location.reload();
+      }, 3000);
+    };
+
+    return () => {
+      ws.close();
+    };
   }, [load]);
 
   const filtered = useMemo(
@@ -69,9 +95,9 @@ export default function AuditLogsPage() {
           l.entity_id,
           l.event_type,
           l.actor_user_id ?? "",
-        ])
+        ]),
       ),
-    [logs, query]
+    [logs, query],
   );
 
   const entityTypeOptions = useMemo(() => {
@@ -196,7 +222,9 @@ export default function AuditLogsPage() {
 
       <div className="overflow-hidden rounded-lg border border-border bg-bg-surface">
         {loading ? (
-          <div className="p-12 text-center text-sm text-fg-muted">Loading...</div>
+          <div className="p-12 text-center text-sm text-fg-muted">
+            Loading...
+          </div>
         ) : filtered.length === 0 ? (
           <EmptyState
             title="No audit events"
@@ -231,8 +259,8 @@ export default function AuditLogsPage() {
                           l.event_type === "INSERT"
                             ? "bg-success/10 text-success"
                             : l.event_type === "UPDATE"
-                            ? "bg-info/10 text-info"
-                            : "bg-danger/10 text-danger"
+                              ? "bg-info/10 text-info"
+                              : "bg-danger/10 text-danger"
                         }`}
                       >
                         {l.event_type}

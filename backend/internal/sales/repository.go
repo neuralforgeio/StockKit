@@ -350,10 +350,12 @@ func (r *Repository) GetByID(ctx context.Context, tenantID, id string) (*SalesOr
 
 func (r *Repository) List(ctx context.Context, tenantID string) ([]SalesOrder, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT `+soColumns+`,
-		       (SELECT COALESCE(SUM(l.quantity * l.unit_price_minor), 0)
-		        FROM sales_order_lines l WHERE l.tenant_id = so.tenant_id AND l.sales_order_id = so.id),
-		       so.currency, so.exchange_rate, so.base_amount_minor
+		SELECT so.id, so.tenant_id, so.number, so.customer_id, c.code, c.name,
+		       so.warehouse_id, w.code, so.status, so.price_list, so.note,
+		       so.submitted_at, so.created_at, so.updated_at,
+		       COALESCE((SELECT SUM(l.quantity * l.unit_price_minor)
+		        FROM sales_order_lines l WHERE l.tenant_id = so.tenant_id AND l.sales_order_id = so.id), 0) as total_minor,
+		       COALESCE(so.currency, 'IDR'), COALESCE(so.exchange_rate, 1.0), COALESCE(so.base_amount_minor, 0)
 		FROM sales_orders so
 		JOIN customers c ON c.tenant_id = so.tenant_id AND c.id = so.customer_id
 		JOIN warehouses w ON w.tenant_id = so.tenant_id AND w.id = so.warehouse_id
