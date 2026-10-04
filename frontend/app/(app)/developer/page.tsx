@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bar,
@@ -76,7 +77,6 @@ export default function DeveloperPage() {
     }
   }, [toast]);
 
-  // Logs polling: INDEPENDENT, never blocked by metrics failures.
   const loadLogs = useCallback(async () => {
     try {
       const l = await getDevLogs(300);
@@ -87,7 +87,6 @@ export default function DeveloperPage() {
     }
   }, []);
 
-  // Metrics polling: allSettled so one failing endpoint doesn't kill the rest.
   const loadMetrics = useCallback(async () => {
     const [m, d, a] = await Promise.allSettled([
       getDevMetrics(),
@@ -108,7 +107,6 @@ export default function DeveloperPage() {
     })();
   }, [loadMe, loadLogs, loadMetrics]);
 
-  // Separate intervals: logs 3s, metrics 10s.
   useEffect(() => {
     if (!autoRefresh || !me?.is_developer) return;
     const tl = setInterval(loadLogs, 3000);
@@ -208,6 +206,110 @@ export default function DeveloperPage() {
               Refresh
             </Button>
           </div>
+        </div>
+      </div>
+
+      {/* ===== Developer Tools Grid — navigasi cepat ke sub-tools ===== */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <Link
+          href="/developer/audit"
+          className="group flex flex-col gap-2 rounded-xl border border-border bg-bg p-5 transition hover:border-accent hover:shadow-sm"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+            </div>
+            <h3 className="text-base font-semibold text-fg">Audit Logs</h3>
+          </div>
+          <p className="text-xs text-fg-muted">
+            Jejak perubahan lengkap di semua entitas sistem. Siapa, kapan, apa.
+          </p>
+          <span className="mt-auto text-xs font-medium text-accent opacity-0 transition group-hover:opacity-100">
+            Buka →
+          </span>
+        </Link>
+
+        <div className="group flex flex-col gap-2 rounded-xl border border-border bg-bg p-5 transition hover:border-accent hover:shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-info/10 text-info">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M18 20V10M12 20V4M6 20v-6" />
+              </svg>
+            </div>
+            <h3 className="text-base font-semibold text-fg">Runtime Metrics</h3>
+          </div>
+          <p className="text-xs text-fg-muted">
+            Goroutines, heap, DB pool, uptime. Lihat di bawah.
+          </p>
+          <span className="mt-auto text-xs font-medium text-info">Aktif ✓</span>
+        </div>
+
+        <div className="group flex flex-col gap-2 rounded-xl border border-border bg-bg p-5 transition hover:border-accent hover:shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10 text-success">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+              </svg>
+            </div>
+            <h3 className="text-base font-semibold text-fg">
+              Request Analytics
+            </h3>
+          </div>
+          <p className="text-xs text-fg-muted">
+            Requests/hour, status distribution, top endpoints.
+          </p>
+          <span className="mt-auto text-xs font-medium text-success">
+            Aktif ✓
+          </span>
+        </div>
+
+        <div className="group flex flex-col gap-2 rounded-xl border border-border bg-bg p-5 transition hover:border-accent hover:shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10 text-warning">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="9" y1="15" x2="15" y2="15" />
+              </svg>
+            </div>
+            <h3 className="text-base font-semibold text-fg">Live Logs</h3>
+          </div>
+          <p className="text-xs text-fg-muted">
+            Streaming log aplikasi 3s, filter level & teks.
+          </p>
+          <span className="mt-auto text-xs font-medium text-warning">
+            Aktif ✓
+          </span>
         </div>
       </div>
 
