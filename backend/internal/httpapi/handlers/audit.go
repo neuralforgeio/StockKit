@@ -88,7 +88,7 @@ func (h *Audit) Export(w http.ResponseWriter, r *http.Request) {
 	fromStr := r.URL.Query().Get("from")
 	toStr := r.URL.Query().Get("to")
 
-	from := time.Now().AddDate(0, -1, 0) // default: 1 bulan terakhir
+	from := time.Now().AddDate(0, -1, 0)
 	to := time.Now()
 	if fromStr != "" {
 		if t, err := time.Parse("2006-01-02", fromStr); err == nil {
@@ -97,7 +97,7 @@ func (h *Audit) Export(w http.ResponseWriter, r *http.Request) {
 	}
 	if toStr != "" {
 		if t, err := time.Parse("2006-01-02", toStr); err == nil {
-			to = t.Add(24*time.Hour - time.Second) // include end of day
+			to = t.Add(24*time.Hour - time.Second)
 		}
 	}
 
@@ -112,7 +112,7 @@ func (h *Audit) Export(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", "attachment; filename=audit-logs.json")
 		writeJSON(w, http.StatusOK, map[string]any{"data": logs})
-	default: // csv
+	default:
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=audit-logs-%s.csv", time.Now().Format("20060102")))
 		cw := csv.NewWriter(w)
