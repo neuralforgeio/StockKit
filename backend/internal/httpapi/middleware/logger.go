@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -26,9 +27,23 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
+// bodyCaptureWriter wraps a ResponseWriter and captures the response body (up to 4KB)
+// so we can extract error codes from JSON envelopes for 5xx log visibility.
+type bodyCaptureWriter struct {
+	http.ResponseWriter
+	buf *bytes.Buffer
+}
+
+func (b *bodyCaptureWriter) Write(p []byte) (int, error) {
+	if b.buf != nil && b.buf.Len() < 4096 {
+		b.buf.Write(p)
+	}
+	return b.ResponseWriter.Write(p)
+}
+
 // ColoredLogger emits a colored, structured request log with required fields:
 // timestamp, level, message, log_id, user_id, ip, url, status, duration, request_id.
-// Reads user_id from X-User-ID response header (set by AuthN middleware).
+// For 5xx responses, also extracts error_code from JSON envelope body.
 func ColoredLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	_ = logger
 	reqLogger := slog.New(logging.NewConsoleHandler(slog.LevelInfo))
@@ -37,20 +52,25 @@ func ColoredLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
-			next.ServeHTTP(ww, r)
+
+			// Wrap ww with a body capture writer so we can inspect 5xx bodies.
+			var bodyBuf bytes.Buffer
+			capture := &bodyCaptureWriter{ResponseWriter: ww, buf: &bodyBuf}
+
+			next.ServeHTTP(capture, r)
 
 			level := slog.LevelInfo
 			var errorCode string
 			if ww.Status() >= 500 {
 				level = slog.LevelError
-				// Try to extract error code from response body for better visibility
-				if body := ww.Bytes(); len(body) > 0 {
+				// Try to extract error code from JSON envelope
+				if bodyBuf.Len() > 0 {
 					var envelope struct {
 						Error struct {
 							Code string `json:"code"`
 						} `json:"error"`
 					}
-					if json.Unmarshal(body, &envelope) == nil && envelope.Error.Code != "" {
+					if err := json.Unmarshal(bodyBuf.Bytes(), &envelope); err == nil && envelope.Error.Code != "" {
 						errorCode = envelope.Error.Code
 					}
 				}

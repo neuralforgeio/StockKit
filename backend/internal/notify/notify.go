@@ -107,3 +107,16 @@ func (s *Service) MarkAll(ctx context.Context, tenantID, userID string) error {
 		WHERE tenant_id = $1 AND user_id = $2 AND read_at IS NULL`, tenantID, userID)
 	return err
 }
+
+// parseUUID validates and returns a pointer to a UUID string, or nil for empty/invalid.
+// Used to safely store entity_id as nullable text column.
+func parseUUID(s string) *string {
+	if s == "" {
+		return nil
+	}
+	// basic UUID v4 format: 8-4-4-4-12 hex chars with dashes
+	if len(s) != 36 {
+		return nil
+	}
+	return &s
+}
