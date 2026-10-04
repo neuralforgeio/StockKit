@@ -9,27 +9,38 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Event is pushed to connected clients over WebSocket.
 type Event struct {
 	ID        string `json:"id"`
 	Kind      string `json:"kind"`
 	Title     string `json:"title"`
 	Body      string `json:"body"`
-	DocType   string `json:"doc_type"`
-	DocID     string `json:"doc_id"`
+	DocType   string `json:"doc_type,omitempty"`
+	DocID     string `json:"doc_id,omitempty"`
 	CreatedAt string `json:"created_at"`
 }
 
 type Sink struct{ Ch chan Event }
 
 type Hub struct {
-	pool  *pgxpool.Pool
+	pool *pgxpool.Pool
+
 	mu    sync.RWMutex
 	conns map[string]map[*Sink]bool
-	last  time.Time
+
+	// last is only touched by the single Run goroutine.
+	last time.Time
+
+	errMu    sync.Mutex
+	errCount int
 }
 
 func NewHub(pool *pgxpool.Pool) *Hub {
-	return &Hub{pool: pool, conns: make(map[string]map[*Sink]bool), last: time.Now()}
+	return &Hub{
+		pool:  pool,
+		conns: make(map[string]map[*Sink]bool),
+		last:  time.Now(),
+	}
 }
 
 func key(tenantID, userID string) string { return tenantID + "|" + userID }
@@ -64,50 +75,54 @@ func (h *Hub) publish(tenantID, userID string, ev Event) {
 	for s := range h.conns[key(tenantID, userID)] {
 		select {
 		case s.Ch <- ev:
-		default:
+		default: // drop if slow consumer
 		}
 	}
 	h.mu.RUnlock()
 }
 
-// Run polls the notifications table every 2s and pushes new events to connected clients.
+const (
+	baseInterval = 2 * time.Second
+	maxInterval  = 30 * time.Second
+)
+
+// Run polls the notifications table and pushes new events to connected clients.
+// On DB error it backs off exponentially and logs once per error streak.
 func (h *Hub) Run(ctx context.Context) {
-	t := time.NewTicker(2 * time.Second)
-	defer t.Stop()
+	interval := baseInterval
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case now := <-t.C:
-			h.poll(ctx, now)
+		case <-timer.C:
+			interval = h.poll(ctx, interval)
+			timer.Reset(interval)
 		}
 	}
 }
 
-func (h *Hub) poll(ctx context.Context, now time.Time) {
+// poll returns the next poll interval (backoff on error, reset on success).
+func (h *Hub) poll(ctx context.Context, cur time.Duration) time.Duration {
+	// Only select columns that are guaranteed to exist in the notifications
+	// table (id, tenant_id, user_id, kind, title, body, created_at).
 	rows, err := h.pool.Query(ctx, `
-		SELECT id, tenant_id, user_id, kind, title, body, doc_type, doc_id, created_at
+		SELECT id, tenant_id, user_id, kind, title, body, created_at
 		FROM notifications
 		WHERE created_at > $1
 		ORDER BY created_at ASC`, h.last)
 	if err != nil {
-		slog.Error("realtime poll failed", "error", err)
-		return
+		return h.onErr(err, cur)
 	}
 	defer rows.Close()
+
 	for rows.Next() {
 		var ev Event
 		var tenantID, userID string
-		var docType, docID *string
 		var createdAt time.Time
-		if err := rows.Scan(&ev.ID, &tenantID, &userID, &ev.Kind, &ev.Title, &ev.Body, &docType, &docID, &createdAt); err != nil {
+		if err := rows.Scan(&ev.ID, &tenantID, &userID, &ev.Kind, &ev.Title, &ev.Body, &createdAt); err != nil {
 			continue
-		}
-		if docType != nil {
-			ev.DocType = *docType
-		}
-		if docID != nil {
-			ev.DocID = *docID
 		}
 		ev.CreatedAt = createdAt.Format(time.RFC3339)
 		h.publish(tenantID, userID, ev)
@@ -115,5 +130,32 @@ func (h *Hub) poll(ctx context.Context, now time.Time) {
 			h.last = createdAt
 		}
 	}
-	h.last = now
+
+	h.onOK()
+	return baseInterval
+}
+
+// onErr applies exponential backoff and logs only the first failure of a streak.
+func (h *Hub) onErr(err error, cur time.Duration) time.Duration {
+	h.errMu.Lock()
+	defer h.errMu.Unlock()
+	h.errCount++
+	if h.errCount == 1 {
+		slog.Error("realtime poll failed; backing off", "error", err)
+	}
+	next := cur * 2
+	if next > maxInterval {
+		next = maxInterval
+	}
+	return next
+}
+
+// onOK resets the error streak and logs recovery once.
+func (h *Hub) onOK() {
+	h.errMu.Lock()
+	if h.errCount > 0 {
+		slog.Info("realtime poll recovered")
+	}
+	h.errCount = 0
+	h.errMu.Unlock()
 }
