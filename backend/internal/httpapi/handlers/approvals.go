@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -36,9 +37,23 @@ func mapApprovalError(err error) error {
 	}
 }
 
+// writeInternal logs the ROOT cause server-side and returns a rich envelope
+// so failures are visible in: backend log, frontend toast, and DevTools console.
+func (h *Approvals) writeInternal(w http.ResponseWriter, r *http.Request, operation string, err error, extra map[string]any) {
+	slog.Error("approval handler failed",
+		"operation", operation,
+		"path", r.URL.Path,
+		"error", err,
+	)
+	wrapped := httperr.New("APPROVAL_"+operation+"_FAILED", http.StatusInternalServerError, err.Error())
+	wrapped.WithDetails("operation", operation)
+	for k, v := range extra {
+		wrapped.WithDetails(k, v)
+	}
+	httperr.Write(w, wrapped)
+}
+
 // PendingInbox handles GET /api/v1/approvals/inbox.
-// Defensive: on repository error returns empty list (HTTP 200) to prevent
-// frontend from entering a retry storm. The error remains in server log.
 func (h *Approvals) PendingInbox(w http.ResponseWriter, r *http.Request) {
 	claims, ok := requestClaims(r)
 	if !ok {
@@ -47,8 +62,11 @@ func (h *Approvals) PendingInbox(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := h.svc.PendingInstances(r.Context(), claims.TenantID)
 	if err != nil {
-		// Server logs the error via ColoredLogger middleware.
-		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+		if mapped := mapApprovalError(err); mapped != err {
+			httperr.Write(w, mapped)
+			return
+		}
+		h.writeInternal(w, r, "INBOX", err, nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
@@ -63,7 +81,11 @@ func (h *Approvals) GetInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	inst, err := h.svc.GetInstance(r.Context(), claims.TenantID, chi.URLParam(r, "id"))
 	if err != nil {
-		httperr.Write(w, mapApprovalError(err))
+		if mapped := mapApprovalError(err); mapped != err {
+			httperr.Write(w, mapped)
+			return
+		}
+		h.writeInternal(w, r, "GET_INSTANCE", err, map[string]any{"instance_id": chi.URLParam(r, "id")})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": inst})
@@ -78,7 +100,11 @@ func (h *Approvals) GetByDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	inst, err := h.svc.GetInstanceByDocument(r.Context(), claims.TenantID, chi.URLParam(r, "type"), chi.URLParam(r, "id"))
 	if err != nil {
-		httperr.Write(w, mapApprovalError(err))
+		if mapped := mapApprovalError(err); mapped != err {
+			httperr.Write(w, mapped)
+			return
+		}
+		h.writeInternal(w, r, "GET_BY_DOCUMENT", err, map[string]any{"doc_type": chi.URLParam(r, "type"), "doc_id": chi.URLParam(r, "id")})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": inst})
@@ -91,8 +117,7 @@ type decidePayload struct {
 }
 
 // Decide handles POST /api/v1/approvals/{id}/decide.
-// {id} is the instance id. If body.step_id is empty, the handler resolves the
-// first pending step from the instance automatically.
+// {id} is the instance id; step_id optional (auto-resolves first pending step).
 func (h *Approvals) Decide(w http.ResponseWriter, r *http.Request) {
 	claims, ok := requestClaims(r)
 	if !ok {
@@ -109,11 +134,14 @@ func (h *Approvals) Decide(w http.ResponseWriter, r *http.Request) {
 	instanceID := chi.URLParam(r, "id")
 	stepID := payload.StepID
 
-	// Auto-resolve step_id when frontend does not send one.
 	if stepID == "" {
 		inst, err := h.svc.GetInstance(r.Context(), claims.TenantID, instanceID)
 		if err != nil {
-			httperr.Write(w, mapApprovalError(err))
+			if mapped := mapApprovalError(err); mapped != err {
+				httperr.Write(w, mapped)
+				return
+			}
+			h.writeInternal(w, r, "DECIDE_RESOLVE_STEP", err, map[string]any{"instance_id": instanceID})
 			return
 		}
 		for _, s := range inst.Steps {
@@ -130,7 +158,11 @@ func (h *Approvals) Decide(w http.ResponseWriter, r *http.Request) {
 
 	inst, err := h.svc.Decide(r.Context(), claims.TenantID, stepID, payload.Decision, payload.Reason, claims.Subject)
 	if err != nil {
-		httperr.Write(w, mapApprovalError(err))
+		if mapped := mapApprovalError(err); mapped != err {
+			httperr.Write(w, mapped)
+			return
+		}
+		h.writeInternal(w, r, "DECIDE", err, map[string]any{"instance_id": instanceID, "step_id": stepID})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": inst})

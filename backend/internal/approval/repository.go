@@ -203,6 +203,7 @@ func (r *Repository) GetInstanceByDocument(ctx context.Context, tenantID, docTyp
 }
 
 // Decide records a step decision and finalizes the instance when settled.
+// All internal failures are wrapped with statement context for diagnosability.
 func (r *Repository) Decide(ctx context.Context, tenantID, stepID, decision, reason, actorID string) (*Instance, error) {
 	var instanceID string
 	err := pg.WithTx(ctx, r.pool, func(tx pgx.Tx) error {
@@ -220,7 +221,8 @@ func (r *Repository) Decide(ctx context.Context, tenantID, stepID, decision, rea
 		if err != nil {
 			return fmt.Errorf("lock step: %w", err)
 		}
-		if currentDecision != nil {
+		// Guard: decision '' (default lama) dianggap belum diputuskan; nilai lain = sudah.
+		if currentDecision != nil && *currentDecision != "" {
 			return ErrAlreadyDecided
 		}
 		instanceID = instID
@@ -234,12 +236,12 @@ func (r *Repository) Decide(ctx context.Context, tenantID, stepID, decision, rea
 			SET decision = $1, decided_by = $2, decided_at = now(), reason = $3
 			WHERE id = $4 AND tenant_id = $5`,
 			decision, actorID, reasonArg, stepID, tenantID); err != nil {
-			return fmt.Errorf("update step: %w", err)
+			return fmt.Errorf("update step decision: %w", err)
 		}
 
 		var pending, rejected int
 		if err := tx.QueryRow(ctx, `
-			SELECT COUNT(*) FILTER (WHERE decision IS NULL),
+			SELECT COUNT(*) FILTER (WHERE decision IS NULL OR decision = ''),
 			       COUNT(*) FILTER (WHERE decision = 'rejected')
 			FROM approval_steps
 			WHERE tenant_id = $1 AND instance_id = $2`, tenantID, instID).Scan(&pending, &rejected); err != nil {
@@ -267,7 +269,11 @@ func (r *Repository) Decide(ctx context.Context, tenantID, stepID, decision, rea
 	if err != nil {
 		return nil, err
 	}
-	return r.GetInstance(ctx, tenantID, instanceID)
+	inst, err := r.GetInstance(ctx, tenantID, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("reload instance after decide: %w", err)
+	}
+	return inst, nil
 }
 
 // RulesFor returns active rules for a document type ordered by level.
@@ -314,7 +320,7 @@ func (r *Repository) stepsFor(ctx context.Context, tenantID string, instanceIDs 
 			&st.DecidedBy, &st.DeciderName, &st.DecidedAt, &st.Reason, &st.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan step: %w", err)
 		}
-		if st.Decision == nil {
+		if st.Decision == nil || *st.Decision == "" {
 			st.Status = "pending"
 		} else {
 			st.Status = *st.Decision
