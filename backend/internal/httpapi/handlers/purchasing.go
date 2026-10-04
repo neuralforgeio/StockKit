@@ -92,30 +92,34 @@ func (h *Purchasing) GetByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Purchasing) Create(w http.ResponseWriter, r *http.Request) {
-	claims, ok := requestClaims(r)
-	if !ok {
-		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
-		return
-	}
-	var payload purchaseRequestPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		httperr.Write(w, httperr.New("VALIDATION_FAILED", http.StatusUnprocessableEntity, "Invalid request body"))
-		return
-	}
-	lines := make([]purchasing.CreatePurchaseRequestLineInput, len(payload.Lines))
-	for i, l := range payload.Lines {
-		lines[i] = purchasing.CreatePurchaseRequestLineInput{
-			ProductID: l.ProductID, Quantity: l.Quantity, EstimatedPriceMinor: l.EstimatedPriceMinor, Note: l.Note,
-		}
-	}
-	pr, err := h.svc.CreateWithCurrency(r.Context(), claims.TenantID, claims.Subject, purchasing.CreatePurchaseRequestInput{
-		CostCenter: payload.CostCenter, Reason: payload.Reason, Lines: lines,
-	}, payload.Currency)
-	if err != nil {
-		httperr.Write(w, mapPurchasingError(err))
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": pr})
+    claims, ok := requestClaims(r)
+    if !ok {
+        httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
+        return
+    }
+    var payload purchaseRequestPayload
+    if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+        httperr.Write(w, httperr.New("VALIDATION_FAILED", http.StatusUnprocessableEntity, "Invalid request body"))
+        return
+    }
+    lines := make([]purchasing.CreatePurchaseRequestLineInput, len(payload.Lines))
+    for i, l := range payload.Lines {
+        lines[i] = purchasing.CreatePurchaseRequestLineInput{
+            ProductID: l.ProductID, Quantity: l.Quantity, EstimatedPriceMinor: l.EstimatedPriceMinor, Note: l.Note,
+        }
+    }
+    currency := payload.Currency
+    if currency == "" {
+        currency = "IDR"
+    }
+    pr, err := h.svc.CreateWithCurrency(r.Context(), claims.TenantID, claims.Subject, purchasing.CreatePurchaseRequestInput{
+        CostCenter: payload.CostCenter, Reason: payload.Reason, Lines: lines,
+    }, currency)
+    if err != nil {
+        httperr.Write(w, mapPurchasingError(err))
+        return
+    }
+    writeJSON(w, http.StatusCreated, map[string]any{"data": pr})
 }
 
 func (h *Purchasing) Update(w http.ResponseWriter, r *http.Request) {
