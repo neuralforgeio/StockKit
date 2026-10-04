@@ -32,3 +32,4 @@ coverage/
 logs
 .jsonl
 .log
+.csv
