@@ -127,15 +127,21 @@ func (s *Service) Submit(ctx context.Context, tenantID, actorID, id string) (*Sa
 	if err != nil {
 		return nil, err
 	}
+	if so.Status != "draft" {
+		return nil, ErrInvalidTransition
+	}
 	so, err = s.repo.Submit(ctx, tenantID, id)
 	if err != nil {
 		return nil, err
 	}
 
 	if s.approval != nil {
-		inst, err := s.approval.CreateInstance(ctx, tenantID, "SO", so.ID, so.Number, so.TotalMinor, actorID)
-		if err != nil {
-			return nil, err
+		inst, cerr := s.approval.CreateInstance(ctx, tenantID, "SO", so.ID, so.Number, so.TotalMinor, actorID)
+		if cerr != nil {
+			// Compensating action: kembalikan ke draft agar user bisa retry
+			// setelah akar masalah diperbaiki (SO tidak nyangkut di submitted).
+			_ = s.repo.RevertToDraft(ctx, tenantID, id)
+			return nil, fmt.Errorf("create approval instance: %w", cerr)
 		}
 		if inst != nil {
 			so.ApprovalStatus = "pending"

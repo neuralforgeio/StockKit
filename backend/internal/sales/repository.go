@@ -826,6 +826,17 @@ func (r *Repository) FinalizeByApproval(ctx context.Context, tenantID, id, statu
 	})
 }
 
+// RevertToDraft is a compensating action: used when a post-submit step
+// (e.g. approval instance creation) fails, so the SO returns to editable draft.
+func (r *Repository) RevertToDraft(ctx context.Context, tenantID, id string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE sales_orders
+		SET status = 'draft', submitted_at = NULL, updated_at = now()
+		WHERE id = $1 AND tenant_id = $2 AND status = 'submitted'`,
+		id, tenantID)
+	return err
+}
+
 func (r *Repository) CreateCustomerInvoice(ctx context.Context, tenantID, actorID string, input CreateCustomerInvoiceInput) (*CustomerInvoice, error) {
 	var invID string
 	err := pg.WithTx(ctx, r.pool, func(tx pgx.Tx) error {

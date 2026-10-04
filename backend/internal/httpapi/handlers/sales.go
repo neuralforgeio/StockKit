@@ -181,13 +181,17 @@ func (h *Sales) Submit(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
 		return
 	}
-	id := chi.URLParam(r, "id")
+		id := chi.URLParam(r, "id")
 	so, err := h.svc.Submit(r.Context(), claims.TenantID, claims.Subject, id)
 	if err != nil {
-		// Wrap dengan context agar frontend dapat info di mana error
+		// Known domain errors keep their proper status (409 illegal transition, dll).
+		if mapped := mapSalesError(err); mapped != err {
+			httperr.Write(w, mapped)
+			return
+		}
+		// Unknown/internal errors get rich context for observability.
 		wrapped := httperr.New("SUBMIT_FAILED", http.StatusInternalServerError, err.Error())
-		wrapped.WithDetails("operation", "submit_sales_order").
-			WithDetails("sales_order_id", id)
+		wrapped.WithDetails("operation", "submit_sales_order").WithDetails("sales_order_id", id)
 		httperr.Write(w, wrapped)
 		return
 	}
