@@ -50,10 +50,6 @@ func (e *Error) WithDetails(key string, value any) *Error {
 	return e
 }
 
-type envelope struct {
-	Error *Error `json:"error"`
-}
-
 // Write renders err as the envelope; unknown errors become INTERNAL.
 // In debug mode, stack trace and raw error are exposed; in production, sanitized.
 func Write(w http.ResponseWriter, err error) {

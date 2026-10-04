@@ -144,13 +144,13 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 			r.Post("/refresh", authH.Refresh)
 			r.Post("/logout", authH.Logout)
 			r.Group(func(r chi.Router) {
-				r.Use(middleware.AuthN(kp))
+				r.Use(middleware.AuthN(pool, kp))
 				r.Get("/me", authH.Me)
 			})
 		})
 
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.AuthN(kp))
+			r.Use(middleware.AuthN(pool, kp))
 
 			r.Route("/notifications", func(r chi.Router) {
 				r.Get("/", notificationsH.List)

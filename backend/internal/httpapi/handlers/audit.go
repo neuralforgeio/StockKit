@@ -267,16 +267,3 @@ func (h *Audit) Export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=audit-logs-%s.xlsx", stamp))
 	_, _ = w.Write(buf.Bytes())
 }
-
-// writeBOM writes UTF-8 BOM so Excel renders accents/emoji correctly.
-func writeBOM(w http.ResponseWriter) error {
-	_, err := w.Write([]byte{0xEF, 0xBB, 0xBF})
-	return err
-}
-
-func truncateCell(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-3] + "..."
-}

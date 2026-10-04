@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -75,7 +76,7 @@ func RequireRole(pool *pgxpool.Pool, roles ...string) func(http.Handler) http.Ha
 				httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
 				return
 			}
-			cacheKey := claims.TenantID + "|" + claims.Subject
+			cacheKey := claims.TenantID + "|" + claims.Subject + "|" + strconv.Itoa(claims.PermVersion)
 			userRoles, ok := sharedRoleCache.get(cacheKey)
 			if !ok {
 				var err error
