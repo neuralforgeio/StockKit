@@ -120,37 +120,45 @@ func (r *Repository) Count(ctx context.Context, tenantID string) (int, error) {
 	return count, err
 }
 
-// Export retrieves audit logs within a date range for CSV/JSON export.
+// ExportRow is an audit log enriched with actor identity for exports.
+type ExportRow struct {
+	Log
+	ActorName  *string `json:"actor_name"`
+	ActorEmail *string `json:"actor_email"`
+}
+
+// Export retrieves audit logs within a date range joined with actor identity.
 // Limit default 10_000 rows untuk mencegah OOM di production.
-func (r *Repository) Export(ctx context.Context, tenantID string, from, to time.Time, limit int) ([]Log, error) {
+func (r *Repository) Export(ctx context.Context, tenantID string, from, to time.Time, limit int) ([]ExportRow, error) {
 	if limit <= 0 || limit > 50000 {
 		limit = 10000
 	}
-	query := `
-		SELECT id, tenant_id, actor_user_id, event_type, entity_type, entity_id,
-		       COALESCE(old_data::text, 'null'), COALESCE(new_data::text, 'null'),
-		       COALESCE(metadata::text, 'null'), created_at
-		FROM audit_logs
-		WHERE tenant_id = $1 AND created_at >= $2 AND created_at <= $3
-		ORDER BY created_at DESC
-		LIMIT $4`
-	rows, err := r.pool.Query(ctx, query, tenantID, from, to, limit)
+	rows, err := r.pool.Query(ctx, `
+		SELECT a.id, a.tenant_id, a.actor_user_id, a.event_type, a.entity_type, a.entity_id,
+		       COALESCE(a.old_data::text, 'null'), COALESCE(a.new_data::text, 'null'),
+		       COALESCE(a.metadata::text, 'null'), a.created_at,
+		       u.full_name, u.email
+		FROM audit_logs a
+		LEFT JOIN users u ON u.id = a.actor_user_id
+		WHERE a.tenant_id = $1 AND a.created_at >= $2 AND a.created_at <= $3
+		ORDER BY a.created_at DESC
+		LIMIT $4`, tenantID, from, to, limit)
 	if err != nil {
 		return nil, fmt.Errorf("export audit logs: %w", err)
 	}
 	defer rows.Close()
-	out := []Log{}
+	out := []ExportRow{}
 	for rows.Next() {
-		var l Log
+		var e ExportRow
 		var oldStr, newStr, metaStr string
-		if err := rows.Scan(&l.ID, &l.TenantID, &l.ActorUserID, &l.EventType, &l.EntityType,
-			&l.EntityID, &oldStr, &newStr, &metaStr, &l.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.TenantID, &e.ActorUserID, &e.EventType, &e.EntityType,
+			&e.EntityID, &oldStr, &newStr, &metaStr, &e.CreatedAt, &e.ActorName, &e.ActorEmail); err != nil {
 			return nil, fmt.Errorf("scan audit log: %w", err)
 		}
-		l.OldData = json.RawMessage(oldStr)
-		l.NewData = json.RawMessage(newStr)
-		l.Metadata = json.RawMessage(metaStr)
-		out = append(out, l)
+		e.OldData = json.RawMessage(oldStr)
+		e.NewData = json.RawMessage(newStr)
+		e.Metadata = json.RawMessage(metaStr)
+		out = append(out, e)
 	}
 	return out, rows.Err()
 }
