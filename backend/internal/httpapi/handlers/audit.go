@@ -221,7 +221,7 @@ func (h *Audit) Export(w http.ResponseWriter, r *http.Request) {
 	for col, wd := range map[string]float64{"A": 5, "B": 20, "C": 9, "D": 18, "E": 12, "F": 38, "G": 30, "H": 32, "I": 70} {
 		_ = f.SetColWidth("Events", col, col, wd)
 	}
-	_ = f.AddAutoFilter("Events", "A1:I1", nil)
+	_ = f.AutoFilter("Events", "A1:I1", nil)
 	_ = f.SetPanes("Events", &excelize.Panes{Freeze: true, Split: false, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft"})
 
 	// ===== Sheet 2: Field Changes (detail per field, untuk pivot/filter) =====
@@ -253,7 +253,7 @@ func (h *Audit) Export(w http.ResponseWriter, r *http.Request) {
 	for col, wd := range map[string]float64{"A": 5, "B": 20, "C": 9, "D": 18, "E": 12, "F": 38, "G": 30, "H": 22, "I": 40, "J": 40} {
 		_ = f.SetColWidth("Field Changes", col, col, wd)
 	}
-	_ = f.AddAutoFilter("Field Changes", "A1:J1", nil)
+	_ = f.AutoFilter("Field Changes", "A1:J1", nil)
 	_ = f.SetPanes("Field Changes", &excelize.Panes{Freeze: true, Split: false, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft"})
 
 	f.SetActiveSheet(0)
