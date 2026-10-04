@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch } from "./api/client";
 
 export type RealtimeEvent = {
   id: string;

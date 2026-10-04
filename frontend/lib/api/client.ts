@@ -59,9 +59,22 @@ export async function apiFetch<T>(
 
   const body = (await res.json().catch(() => null)) as T | null;
   if (!res.ok) {
-    const message = (body as { error?: { message?: string } } | null)?.error
-      ?.message;
-    throw new Error(message ?? "Request failed");
+    const err = (
+      body as {
+        error?: {
+          code?: string;
+          message?: string;
+          details?: Record<string, any>;
+        };
+      } | null
+    )?.error;
+    const apiErr = new Error(err?.message ?? "Request failed") as Error & {
+      code?: string;
+      details?: Record<string, any>;
+    };
+    apiErr.code = err?.code;
+    apiErr.details = err?.details;
+    throw apiErr;
   }
   return body as T;
 }

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -39,23 +40,40 @@ func ColoredLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(ww, r)
 
 			level := slog.LevelInfo
+			var errorCode string
 			if ww.Status() >= 500 {
 				level = slog.LevelError
+				// Try to extract error code from response body for better visibility
+				if body := ww.Bytes(); len(body) > 0 {
+					var envelope struct {
+						Error struct {
+							Code string `json:"code"`
+						} `json:"error"`
+					}
+					if json.Unmarshal(body, &envelope) == nil && envelope.Error.Code != "" {
+						errorCode = envelope.Error.Code
+					}
+				}
 			} else if ww.Status() >= 400 {
 				level = slog.LevelWarn
 			}
 
 			userID := ww.Header().Get("X-User-ID")
 
-			reqLogger.Log(r.Context(), level, "http request",
+			args := []any{
 				"log_id", logging.NewLogID(),
 				"user_id", userID,
 				"ip", clientIP(r),
-				"url", r.Method+" "+r.URL.Path,
+				"url", r.Method + " " + r.URL.Path,
 				"status", ww.Status(),
 				"duration_ms", time.Since(start).Milliseconds(),
 				"request_id", chimw.GetReqID(r.Context()),
-			)
+			}
+			if errorCode != "" {
+				args = append(args, "error_code", errorCode)
+			}
+
+			reqLogger.Log(r.Context(), level, "http request", args...)
 		})
 	}
 }

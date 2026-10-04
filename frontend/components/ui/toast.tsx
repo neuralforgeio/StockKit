@@ -19,7 +19,7 @@ type Toast = {
 
 export type ToastAPI = {
   success: (title: string, description?: string) => void;
-  error: (title: string, description?: string) => void;
+  error: (title: string, description?: string | { message: string; details?: Record<string, any> }) => void;
   warning: (title: string, description?: string) => void;
   info: (title: string, description?: string) => void;
   dismiss: (id: number) => void;

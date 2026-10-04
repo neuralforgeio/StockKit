@@ -181,9 +181,14 @@ func (h *Sales) Submit(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
 		return
 	}
-	so, err := h.svc.Submit(r.Context(), claims.TenantID, claims.Subject, chi.URLParam(r, "id"))
+	id := chi.URLParam(r, "id")
+	so, err := h.svc.Submit(r.Context(), claims.TenantID, claims.Subject, id)
 	if err != nil {
-		httperr.Write(w, mapSalesError(err))
+		// Wrap dengan context agar frontend dapat info di mana error
+		wrapped := httperr.New("SUBMIT_FAILED", http.StatusInternalServerError, err.Error())
+		wrapped.WithDetails("operation", "submit_sales_order").
+			WithDetails("sales_order_id", id)
+		httperr.Write(w, wrapped)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": so})

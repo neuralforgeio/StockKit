@@ -29,8 +29,10 @@ func New(pool *pgxpool.Pool) *Service {
 // UsersWithRole returns user ids holding the given role in the tenant.
 func (s *Service) UsersWithRole(ctx context.Context, tenantID, role string) []string {
 	rows, err := s.pool.Query(ctx, `
-		SELECT user_id FROM user_roles
-		WHERE tenant_id = $1 AND role = $2`, tenantID, role)
+		SELECT ur.user_id
+		FROM user_roles ur
+		JOIN roles r ON r.id = ur.role_id AND r.tenant_id = ur.tenant_id
+		WHERE ur.tenant_id = $1 AND r.name = $2`, tenantID, role)
 	if err != nil {
 		return nil
 	}
@@ -53,13 +55,6 @@ func (s *Service) Emit(ctx context.Context, tenantID string, userIDs []string, k
 			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 			tenantID, uid, kind, title, body, entityType, parseUUID(entityID))
 	}
-}
-
-func parseUUID(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
 }
 
 // List returns the latest notifications for one user, unread first.
