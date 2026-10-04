@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -133,6 +134,26 @@ func (h *Hub) poll(ctx context.Context, cur time.Duration) time.Duration {
 
 	h.onOK()
 	return baseInterval
+}
+
+// BroadcastTenant pushes an event to ALL connected clients of a tenant.
+// Used for tenant-wide streams (e.g. audit events) over the single
+// shared WebSocket connection per user.
+func (h *Hub) BroadcastTenant(tenantID string, ev Event) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	prefix := tenantID + "|"
+	for key, conns := range h.conns {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		for s := range conns {
+			select {
+			case s.Ch <- ev:
+			default: // drop if slow consumer
+			}
+		}
+	}
 }
 
 // onErr applies exponential backoff and logs only the first failure of a streak.

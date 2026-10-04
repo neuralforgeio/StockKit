@@ -75,10 +75,9 @@ func (h *Hub) Broadcast(tenantID string, message any) {
 }
 
 // StartListener starts a long-running goroutine that LISTENs on the
-// 'audit_events' PostgreSQL channel and broadcasts incoming events to
-// the appropriate tenant's WebSocket clients. The goroutine runs until
-// ctx is canceled and automatically reconnects on DB errors.
-func StartListener(ctx context.Context, pool *pgxpool.Pool, hub *Hub, logger *slog.Logger) {
+// 'audit_events' PostgreSQL channel and forwards incoming events via the
+// broadcast callback (wired to the realtime hub in router.go).
+func StartListener(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger, broadcast func(tenantID string, payload map[string]any)) {
 	go func() {
 		for {
 			select {
@@ -86,7 +85,7 @@ func StartListener(ctx context.Context, pool *pgxpool.Pool, hub *Hub, logger *sl
 				logger.Info("audit listener shutting down")
 				return
 			default:
-				if err := listenLoop(ctx, pool, hub, logger); err != nil {
+				if err := listenLoop(ctx, pool, logger, broadcast); err != nil {
 					if ctx.Err() != nil {
 						return
 					}
@@ -102,7 +101,7 @@ func StartListener(ctx context.Context, pool *pgxpool.Pool, hub *Hub, logger *sl
 	}()
 }
 
-func listenLoop(ctx context.Context, pool *pgxpool.Pool, hub *Hub, logger *slog.Logger) error {
+func listenLoop(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger, broadcast func(string, map[string]any)) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire listener conn: %w", err)
@@ -137,8 +136,7 @@ func listenLoop(ctx context.Context, pool *pgxpool.Pool, hub *Hub, logger *slog.
 			continue
 		}
 
-		hub.Broadcast(event.TenantID, map[string]any{
-			"type":          "audit_event",
+		broadcast(event.TenantID, map[string]any{
 			"id":            event.ID,
 			"event_type":    event.EventType,
 			"entity_type":   event.EntityType,

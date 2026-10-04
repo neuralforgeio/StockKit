@@ -9,6 +9,7 @@ import { useToast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api/client";
 import { API_BASE } from "@/lib/api/base";
 import { fuzzyMatch } from "@/lib/fuzzy";
+import { realtime } from "@/lib/realtime";
 
 type AuditLog = {
   id: number;
@@ -57,58 +58,15 @@ export default function AuditLogsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter.from, filter.to, filter.entityType]);
 
+  // Subscribe ke SATU WebSocket bersama (dimiliki topbar via realtime.ts).
+  // Event audit tiba sebagai kind === "audit_event" → refresh tabel.
   useEffect(() => {
-    // WebSocket URL: gunakan API_BASE yang sudah dikonfigurasi di lib/api/base
-    // (default http://localhost:8080 → ws://localhost:8080)
-    const wsUrl =
-      (API_BASE ?? "http://localhost:8080/api/v1").replace(/^http/, "ws") +
-      "/audit-logs/ws";
-
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let active = true;
-
-    const connect = () => {
-      if (!active) return;
-      ws = new WebSocket(wsUrl);
-
-      ws.onopen = () => {
-        console.log("[audit-ws] connected to", wsUrl);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === "audit_event") {
-            console.log("[audit-ws] new event:", data);
-            load(); // auto-refresh tabel
-          }
-        } catch {
-          /* ignore parse errors */
-        }
-      };
-
-      ws.onerror = (e) => {
-        console.warn("[audit-ws] error", e);
-      };
-
-      ws.onclose = () => {
-        if (!active) return;
-        // auto-reconnect setelah 3 detik (dengan exponential backoff ringan)
-        reconnectTimer = setTimeout(connect, 3000);
-      };
-    };
-
-    connect();
-
-    return () => {
-      active = false;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (ws) {
-        ws.onclose = null; // prevent auto-reconnect on intentional close
-        ws.close();
+    const off = realtime.on((ev) => {
+      if (ev.kind === "audit_event") {
+        load();
       }
-    };
+    });
+    return off;
   }, [load]);
 
   const filtered = useMemo(

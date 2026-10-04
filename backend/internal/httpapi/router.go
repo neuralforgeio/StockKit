@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -124,9 +125,21 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 
 	auditRepo := audit.NewRepository(pool)
 	auditH := handlers.NewAudit(auditRepo)
-	auditHub := audit.NewHub(logger)
+		auditHub := audit.NewHub(logger)
 	auditWSH := handlers.NewAuditWS(auditHub)
-	audit.StartListener(context.Background(), pool, auditHub, logger)
+	// Audit events pushed over the SINGLE shared realtime WebSocket
+	// (per-user connection owned by the topbar) — avoids a second
+	// persistent connection per page (browser 6-conn/host HTTP/1.1 limit).
+	audit.StartListener(context.Background(), pool, logger, func(tenantID string, payload map[string]any) {
+		rtHub.BroadcastTenant(tenantID, realtime.Event{
+			Kind:      "audit_event",
+			Title:     fmt.Sprintf("%v %v", payload["event_type"], payload["entity_type"]),
+			Body:      fmt.Sprintf("%v", payload["entity_id"]),
+			DocType:   fmt.Sprintf("%v", payload["entity_type"]),
+			DocID:     fmt.Sprintf("%v", payload["entity_id"]),
+			CreatedAt: fmt.Sprintf("%v", payload["created_at"]),
+		})
+	})
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
