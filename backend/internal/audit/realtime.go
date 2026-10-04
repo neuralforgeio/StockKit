@@ -1,11 +1,15 @@
 package audit
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Hub manages WebSocket connections for real-time audit notifications.
@@ -67,5 +71,80 @@ func (h *Hub) Broadcast(tenantID string, message any) {
 			conn.Close()
 			delete(conns, conn)
 		}
+	}
+}
+
+// StartListener starts a long-running goroutine that LISTENs on the
+// 'audit_events' PostgreSQL channel and broadcasts incoming events to
+// the appropriate tenant's WebSocket clients. The goroutine runs until
+// ctx is canceled and automatically reconnects on DB errors.
+func StartListener(ctx context.Context, pool *pgxpool.Pool, hub *Hub, logger *slog.Logger) {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				logger.Info("audit listener shutting down")
+				return
+			default:
+				if err := listenLoop(ctx, pool, hub, logger); err != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					logger.Error("audit listener error, reconnecting in 3s", "error", err)
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(3 * time.Second):
+					}
+				}
+			}
+		}
+	}()
+}
+
+func listenLoop(ctx context.Context, pool *pgxpool.Pool, hub *Hub, logger *slog.Logger) error {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire listener conn: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, "LISTEN audit_events"); err != nil {
+		return fmt.Errorf("LISTEN audit_events: %w", err)
+	}
+	logger.Info("audit listener started", "channel", "audit_events")
+
+	for {
+		notification, err := conn.Conn().WaitForNotification(ctx)
+		if err != nil {
+			return fmt.Errorf("wait notification: %w", err)
+		}
+		if notification.Channel != "audit_events" {
+			continue
+		}
+
+		var event struct {
+			ID          int64     `json:"id"`
+			TenantID    string    `json:"tenant_id"`
+			ActorUserID *string   `json:"actor_user_id"`
+			EventType   string    `json:"event_type"`
+			EntityType  string    `json:"entity_type"`
+			EntityID    string    `json:"entity_id"`
+			CreatedAt   time.Time `json:"created_at"`
+		}
+		if err := json.Unmarshal([]byte(notification.Payload), &event); err != nil {
+			logger.Warn("audit listener unmarshal", "error", err, "payload", notification.Payload)
+			continue
+		}
+
+		hub.Broadcast(event.TenantID, map[string]any{
+			"type":          "audit_event",
+			"id":            event.ID,
+			"event_type":    event.EventType,
+			"entity_type":   event.EntityType,
+			"entity_id":     event.EntityID,
+			"actor_user_id": event.ActorUserID,
+			"created_at":    event.CreatedAt.Format(time.RFC3339),
+		})
 	}
 }

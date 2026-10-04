@@ -126,6 +126,7 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 	auditH := handlers.NewAudit(auditRepo)
 	auditHub := audit.NewHub(logger)
 	auditWSH := handlers.NewAuditWS(auditHub)
+	audit.StartListener(context.Background(), pool, auditHub, logger)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
