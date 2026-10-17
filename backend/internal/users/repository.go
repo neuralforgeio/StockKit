@@ -3,21 +3,22 @@ package users
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type User struct {
-	ID          string   `json:"id"`
-	TenantID    string   `json:"tenant_id"`
-	Email       string   `json:"email"`
-	FullName    string   `json:"full_name"`
-	Status      string   `json:"status"`
-	PermVersion int      `json:"perm_version"`
-	Roles       []string `json:"roles"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	Email       string    `json:"email"`
+	FullName    string    `json:"full_name"`
+	Status      string    `json:"status"`
+	PermVersion int       `json:"perm_version"`
+	Roles       []string  `json:"roles"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type Role struct {
