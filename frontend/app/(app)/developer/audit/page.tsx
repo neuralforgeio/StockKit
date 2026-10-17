@@ -28,6 +28,7 @@ export default function AuditLogsPage() {
   const toast = useToast();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState({
     from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
@@ -38,8 +39,12 @@ export default function AuditLogsPage() {
   });
   const [selected, setSelected] = useState<AuditLog | null>(null);
 
+  // Load data dengan AbortController + 15s timeout untuk mencegah "Loading..." forever
   const load = useCallback(async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
     setLoading(true);
+    setLoadError(null);
     try {
       const params = new URLSearchParams();
       if (filter.entityType) params.set("entity_type", filter.entityType);
@@ -48,27 +53,39 @@ export default function AuditLogsPage() {
       params.set("limit", "500");
       const res = await apiFetch<{ data: AuditLog[]; pagination: any }>(
         `/audit-logs?${params.toString()}`,
+        { signal: ctrl.signal },
       );
       setLogs(res.data ?? []);
     } catch (err: any) {
-      toast.error("Load failed", err.message);
+      const msg =
+        err?.name === "AbortError"
+          ? "Timeout >15s: koneksi browser kemungkinan jenuh/antre. Tutup tab localhost lain, hard-refresh (Ctrl+Shift+R), atau coba incognito."
+          : (err?.message ?? "Failed to load");
+      setLoadError(msg);
+      toast.error("Load failed", msg);
     } finally {
+      clearTimeout(timer);
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter.from, filter.to, filter.entityType]);
 
+  // Load on mount & filter change
+  useEffect(() => {
+    load();
+  }, [load]);
+
   // Subscribe ke SATU WebSocket bersama (dimiliki topbar via realtime.ts).
   // Event audit tiba sebagai kind === "audit_event" → refresh tabel.
+  // Hindari koneksi persisten kedua per tab (browser limit 6 socket/host).
   useEffect(() => {
     const off = realtime.on((ev) => {
-      if (ev.kind === "audit_event") {
-        load();
-      }
+      if (ev.kind === "audit_event") load();
     });
     return off;
   }, [load]);
 
+  // Filter client-side via fuzzy match
   const filtered = useMemo(
     () =>
       logs.filter((l) =>
@@ -82,11 +99,13 @@ export default function AuditLogsPage() {
     [logs, query],
   );
 
+  // Entity type options (unik dari data yang ada)
   const entityTypeOptions = useMemo(() => {
     const set = new Set(logs.map((l) => l.entity_type));
     return Array.from(set).sort();
   }, [logs]);
 
+  // Export handler (Excel / JSON via backend /audit-logs/export)
   const handleExport = (format: "xlsx" | "json") => {
     const params = new URLSearchParams({ format });
     if (filter.from) params.set("from", filter.from);
@@ -94,12 +113,14 @@ export default function AuditLogsPage() {
     window.open(`${API_BASE}/audit-logs/export?${params.toString()}`, "_blank");
   };
 
+  // Render nilai untuk diff view
   const renderValue = (v: any): string => {
     if (v === null || v === undefined) return "—";
     if (typeof v === "object") return JSON.stringify(v);
     return String(v);
   };
 
+  // Hitung diff antara old_data dan new_data
   const diff = useMemo(() => {
     if (!selected) return [];
     const old = selected.old_data ?? {};
@@ -110,6 +131,7 @@ export default function AuditLogsPage() {
     ]);
     const rows: { field: string; oldVal: any; newVal: any }[] = [];
     for (const k of keys) {
+      // Skip system fields
       if (["id", "tenant_id", "created_at", "updated_at"].includes(k)) continue;
       const ov = old?.[k];
       const nv = neo?.[k];
@@ -122,6 +144,7 @@ export default function AuditLogsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <Link
@@ -148,6 +171,7 @@ export default function AuditLogsPage() {
         </div>
       </div>
 
+      {/* Filter bar */}
       <div className="flex flex-wrap gap-3 rounded-lg border border-border bg-bg-surface p-4">
         <div>
           <label className="mb-1 block text-xs font-medium text-fg-muted">
@@ -202,6 +226,17 @@ export default function AuditLogsPage() {
         </div>
       </div>
 
+      {/* Error banner (muncul saat load timeout/gagal) */}
+      {loadError && (
+        <div className="flex items-center justify-between rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <span>{loadError}</span>
+          <Button size="sm" variant="secondary" onClick={load}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* Main table */}
       <div className="overflow-hidden rounded-lg border border-border bg-bg-surface">
         {loading ? (
           <div className="p-12 text-center text-sm text-fg-muted">
@@ -270,6 +305,7 @@ export default function AuditLogsPage() {
         )}
       </div>
 
+      {/* Detail modal */}
       {selected && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -289,6 +325,8 @@ export default function AuditLogsPage() {
                 ✕
               </button>
             </div>
+
+            {/* Metadata grid */}
             <div className="mb-4 grid grid-cols-2 gap-3 text-sm">
               <div>
                 <div className="text-xs text-fg-muted">Waktu</div>
@@ -318,6 +356,7 @@ export default function AuditLogsPage() {
               </div>
             </div>
 
+            {/* Diff table */}
             <h3 className="mb-2 text-sm font-semibold text-fg">
               Perubahan ({diff.length} field)
             </h3>

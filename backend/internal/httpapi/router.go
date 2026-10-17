@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -125,7 +126,7 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 
 	auditRepo := audit.NewRepository(pool)
 	auditH := handlers.NewAudit(auditRepo)
-		auditHub := audit.NewHub(logger)
+	auditHub := audit.NewHub(logger)
 	auditWSH := handlers.NewAuditWS(auditHub)
 	// Audit events pushed over the SINGLE shared realtime WebSocket
 	// (per-user connection owned by the topbar) — avoids a second
@@ -337,7 +338,7 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 			})
 
 			// PATCH RBAC: audit-logs hanya untuk developer + auditor
-			r.With(middleware.RequireRole(pool, "developer", "auditor")).Get("/audit-logs", auditH.List)
+			r.With(middleware.RequireRole(pool, "developer", "auditor"), chimw.Timeout(30*time.Second)).Get("/audit-logs", auditH.List)
 			r.With(middleware.RequireRole(pool, "developer", "auditor")).Get("/audit-logs/export", auditH.Export)
 			r.With(middleware.RequireRole(pool, "developer", "auditor")).Get("/audit-logs/ws", auditWSH.ServeWS)
 
