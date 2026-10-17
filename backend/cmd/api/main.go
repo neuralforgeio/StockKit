@@ -53,6 +53,8 @@ func run(args []string) error {
 		return migrateCmd(args[1:])
 	case "seed":
 		return seedCmd()
+	case "bootstrap-user":
+		return bootstrapUserCmd(args[1:])
 	case "version":
 		info := version.Get()
 		fmt.Printf("%s (commit %s, built %s)\n", info.Version, info.Commit, info.BuildDate)

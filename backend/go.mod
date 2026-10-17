@@ -14,7 +14,8 @@ require (
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/xuri/excelize/v2 v2.11.0
 	golang.org/x/crypto v0.53.0
-	golang.org/x/sys v0.48.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/term v0.47.0
 )
 
 require (
