@@ -32,6 +32,7 @@ import (
 	"github.com/neuralforgeio/StockKit/internal/sales"
 	"github.com/neuralforgeio/StockKit/internal/suppliers"
 	"github.com/neuralforgeio/StockKit/internal/units"
+	"github.com/neuralforgeio/StockKit/internal/users"
 	"github.com/neuralforgeio/StockKit/internal/warehouses"
 )
 
@@ -122,6 +123,10 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 	dashboardH := handlers.NewDashboard(dashboardSvc)
 
 	usersH := handlers.NewUsers(pool)
+
+	usersMgmtRepo := users.NewRepository(pool)
+	usersMgmtH := handlers.NewUsersMgmt(usersMgmtRepo)
+
 	devH := handlers.NewDev(pool, "./logs")
 
 	auditRepo := audit.NewRepository(pool)
@@ -348,6 +353,15 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 				r.Patch("/me", usersH.UpdateMe)
 				r.Post("/me/avatar", usersH.UploadAvatar)
 				r.Get("/me/avatar", usersH.GetAvatar)
+			})
+
+			r.Route("/users-mgmt", func(r chi.Router) {
+				r.Use(middleware.RequireRole(pool, "owner", "developer"))
+				r.Get("/", usersMgmtH.List)
+				r.Get("/roles", usersMgmtH.ListRoles)
+				r.Get("/{id}", usersMgmtH.Get)
+				r.Post("/{id}/roles", usersMgmtH.AssignRole)
+				r.Delete("/{id}/roles/{role}", usersMgmtH.RevokeRole)
 			})
 		})
 	})
