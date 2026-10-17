@@ -99,6 +99,9 @@ func (h *Hub) Run(ctx context.Context) {
 			return
 		case <-timer.C:
 			interval = h.poll(ctx, interval)
+			if interval <= 0 {
+				return // terminal stop: pool closed during shutdown
+			}
 			timer.Reset(interval)
 		}
 	}
@@ -158,6 +161,12 @@ func (h *Hub) BroadcastTenant(tenantID string, ev Event) {
 
 // onErr applies exponential backoff and logs only the first failure of a streak.
 func (h *Hub) onErr(err error, cur time.Duration) time.Duration {
+	// Terminal: pool closed during graceful shutdown. pgxpool doesn't
+	// export a sentinel error, so we detect by message substring.
+	if err != nil && strings.Contains(err.Error(), "closed pool") {
+		slog.Info("realtime poller stopped: database pool closed (shutdown)")
+		return 0
+	}
 	h.errMu.Lock()
 	defer h.errMu.Unlock()
 	h.errCount++

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -87,6 +88,11 @@ func StartListener(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger,
 			default:
 				if err := listenLoop(ctx, pool, logger, broadcast); err != nil {
 					if ctx.Err() != nil {
+						return
+					}
+					// Terminal: pool/conn closed during graceful shutdown.
+					if err != nil && (strings.Contains(err.Error(), "closed pool") || strings.Contains(err.Error(), "conn closed")) {
+						logger.Info("audit listener stopped: database pool closed (shutdown)")
 						return
 					}
 					logger.Error("audit listener error, reconnecting in 3s", "error", err)
