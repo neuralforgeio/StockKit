@@ -364,6 +364,7 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 				r.Post("/{id}/roles", usersMgmtH.AssignRole)
 				r.Delete("/{id}/roles/{role}", usersMgmtH.RevokeRole)
 				r.Post("/{id}/reset-password", usersMgmtH.ResetPassword)
+				r.Patch("/{id}/status", usersMgmtH.SetStatus)
 			})
 		})
 	})

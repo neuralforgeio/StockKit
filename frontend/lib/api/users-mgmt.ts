@@ -81,3 +81,17 @@ export async function resetPasswordMgmt(
     body: JSON.stringify({ password }),
   });
 }
+
+export async function setUserStatusMgmt(
+  userId: string,
+  status: "active" | "inactive",
+): Promise<ManagedUser> {
+  const body = await apiFetch<{ data: ManagedUser }>(
+    `/users-mgmt/${userId}/status`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    },
+  );
+  return body.data;
+}

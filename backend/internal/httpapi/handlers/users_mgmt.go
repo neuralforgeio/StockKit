@@ -111,7 +111,7 @@ func (h *UsersMgmt) AssignRole(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.repo.AssignRole(r.Context(), claims.TenantID, userID, payload.RoleName); err != nil {
+	if err := h.repo.AssignRole(r.Context(), claims.TenantID, claims.Subject, userID, payload.RoleName); err != nil {
 		httperr.Write(w, httperr.New("ASSIGN_FAILED", http.StatusUnprocessableEntity, err.Error()))
 		return
 	}
@@ -133,7 +133,7 @@ func (h *UsersMgmt) RevokeRole(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := chi.URLParam(r, "id")
 	roleName := chi.URLParam(r, "role")
-	if err := h.repo.RevokeRole(r.Context(), claims.TenantID, userID, roleName); err != nil {
+	if err := h.repo.RevokeRole(r.Context(), claims.TenantID, claims.Subject, userID, roleName); err != nil {
 		httperr.Write(w, httperr.New("REVOKE_FAILED", http.StatusUnprocessableEntity, err.Error()))
 		return
 	}
@@ -200,7 +200,7 @@ func (h *UsersMgmt) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err := h.repo.Create(r.Context(), claims.TenantID, users.CreateUserInput{
+	u, err := h.repo.Create(r.Context(), claims.TenantID, claims.Subject, users.CreateUserInput{
 		Email:        payload.Email,
 		FullName:     payload.FullName,
 		PasswordHash: hash,
@@ -233,15 +233,48 @@ func (h *UsersMgmt) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := auth.HashPassword(payload.Password)
-	if err != nil {
-		httperr.Write(w, httperr.New("INTERNAL", http.StatusInternalServerError, "Failed to hash password"))
-		return
-	}
-
-	if err := h.repo.ResetPassword(r.Context(), claims.TenantID, chi.URLParam(r, "id"), hash); err != nil {
+	// Repo handles hashing + reuse prevention internally.
+	if err := h.repo.ResetPassword(r.Context(), claims.TenantID, claims.Subject, chi.URLParam(r, "id"), payload.Password); err != nil {
+		if errors.Is(err, users.ErrPasswordReused) {
+			httperr.Write(w, httperr.New("PASSWORD_REUSED", http.StatusUnprocessableEntity, "New password must be different from the current password"))
+			return
+		}
 		httperr.Write(w, httperr.New("RESET_FAILED", http.StatusUnprocessableEntity, err.Error()))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "password_reset"})
+}
+
+type setStatusPayload struct {
+	Status string `json:"status"`
+}
+
+// SetStatus handles PATCH /api/v1/users-mgmt/{id}/status ("active"|"inactive").
+// Deactivating revokes all sessions. Self-deactivation is rejected.
+func (h *UsersMgmt) SetStatus(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requestClaims(r)
+	if !ok {
+		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
+		return
+	}
+	userID := chi.URLParam(r, "id")
+	var payload setStatusPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		httperr.Write(w, httperr.New("VALIDATION_FAILED", http.StatusUnprocessableEntity, "Invalid request body"))
+		return
+	}
+	if userID == claims.Subject {
+		httperr.Write(w, httperr.New("SELF_OPERATION", http.StatusUnprocessableEntity, "You cannot change your own status"))
+		return
+	}
+	if err := h.repo.SetStatus(r.Context(), claims.TenantID, claims.Subject, userID, payload.Status); err != nil {
+		httperr.Write(w, httperr.New("STATUS_FAILED", http.StatusUnprocessableEntity, err.Error()))
+		return
+	}
+	u, err := h.repo.GetByID(r.Context(), claims.TenantID, userID)
+	if err != nil {
+		httperr.Write(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": u})
 }

@@ -13,6 +13,7 @@ import {
   listUsersMgmt,
   resetPasswordMgmt,
   revokeRoleMgmt,
+  setUserStatusMgmt,
   type ManagedUser,
   type Role,
 } from "@/lib/api/users-mgmt";
@@ -28,6 +29,91 @@ const ROLE_COLORS: Record<string, string> = {
   warehouse: "bg-cyan-500/15 text-cyan-400",
   auditor: "bg-pink-500/15 text-pink-400",
 };
+
+/* ---------- Password field with eye toggle + match indicator ---------- */
+
+function PasswordField({
+  label,
+  value,
+  onChange,
+  match,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  match?: boolean | null;
+  placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <label className="block text-xs font-medium text-fg-muted">
+          {label}
+        </label>
+        {match === true && (
+          <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-semibold text-success">
+            Correct
+          </span>
+        )}
+        {match === false && (
+          <span className="rounded bg-danger/10 px-1.5 py-0.5 text-[10px] font-semibold text-danger">
+            Incorrect
+          </span>
+        )}
+      </div>
+      <div className="relative">
+        <input
+          type={show ? "text" : "password"}
+          required
+          minLength={8}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full rounded-md border border-border bg-bg px-3 py-1.5 pr-9 text-sm text-fg"
+        />
+        <button
+          type="button"
+          onClick={() => setShow((s) => !s)}
+          aria-label={show ? "Hide password" : "Show password"}
+          title={show ? "Hide password" : "Show password"}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-fg-subtle transition hover:bg-bg-subtle hover:text-fg"
+        >
+          {show ? (
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden
+            >
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+              <line x1="1" y1="1" x2="23" y2="23" />
+            </svg>
+          ) : (
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden
+            >
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------- Page -------------------------------- */
 
 export default function UsersPage() {
   const toast = useToast();
@@ -76,6 +162,27 @@ export default function UsersPage() {
   const availableRolesFor = (u: ManagedUser) =>
     roles.filter((r) => !u.roles.includes(r.name));
 
+  // Live match indicators (null = confirm masih kosong)
+  const createMatch =
+    createDraft.confirm.length > 0
+      ? createDraft.password === createDraft.confirm
+      : null;
+  const resetMatch =
+    resetDraft.confirm.length > 0
+      ? resetDraft.password === resetDraft.confirm
+      : null;
+
+  const canSubmitCreate =
+    !submitting &&
+    createDraft.email.includes("@") &&
+    createDraft.full_name.trim() !== "" &&
+    createDraft.password.length >= 8 &&
+    createMatch === true &&
+    createDraft.roles.length > 0;
+
+  const canSubmitReset =
+    !submitting && resetDraft.password.length >= 8 && resetMatch === true;
+
   const handleAssign = async (user: ManagedUser, roleName: string) => {
     try {
       const updated = await assignRoleMgmt(user.id, roleName);
@@ -89,7 +196,7 @@ export default function UsersPage() {
 
   const handleRevoke = async (user: ManagedUser, roleName: string) => {
     if (roleName === "developer" && user.roles.length === 1) {
-      toast.warning("Cannot revoke", "User must have at least one role");
+      toast.error("Cannot revoke", "User must have at least one role");
       return;
     }
     if (!confirm(`Revoke "${roleName}" from ${user.email}?`)) return;
@@ -101,6 +208,7 @@ export default function UsersPage() {
       toast.error("Revoke failed", err.message);
     }
   };
+
   const toggleDraftRole = (name: string) =>
     setCreateDraft((d) => ({
       ...d,
@@ -111,14 +219,7 @@ export default function UsersPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (createDraft.password !== createDraft.confirm) {
-      toast.error("Validation failed", "Passwords do not match");
-      return;
-    }
-    if (createDraft.roles.length === 0) {
-      toast.error("Validation failed", "Select at least one role");
-      return;
-    }
+    if (!canSubmitCreate) return;
     setSubmitting(true);
     try {
       const u = await createUserMgmt({
@@ -146,11 +247,7 @@ export default function UsersPage() {
 
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resetFor) return;
-    if (resetDraft.password !== resetDraft.confirm) {
-      toast.error("Validation failed", "Passwords do not match");
-      return;
-    }
+    if (!resetFor || !canSubmitReset) return;
     setSubmitting(true);
     try {
       await resetPasswordMgmt(resetFor.id, resetDraft.password);
@@ -168,8 +265,30 @@ export default function UsersPage() {
     }
   };
 
+  const handleToggleStatus = async (u: ManagedUser) => {
+    const next = u.status === "active" ? "inactive" : "active";
+    const label = next === "inactive" ? "Deactivate" : "Activate";
+    if (
+      !confirm(
+        `${label} ${u.email}?${next === "inactive" ? " User akan logout dari semua perangkat dan tidak bisa login." : ""}`,
+      )
+    )
+      return;
+    try {
+      const updated = await setUserStatusMgmt(u.id, next);
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? updated : x)));
+      toast.success(
+        next === "inactive" ? "Deactivated" : "Activated",
+        `${u.email} is now ${next}.`,
+      );
+    } catch (err: any) {
+      toast.error(`${label} failed`, err.message);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <Link
@@ -188,10 +307,11 @@ export default function UsersPage() {
           <Button variant="secondary" onClick={load} disabled={loading}>
             Refresh
           </Button>
-          <Button onClick={() => setCreateOpen(true)}>Create User</Button>
+          <Button onClick={() => setCreateOpen(true)}>Create user</Button>
         </div>
       </div>
 
+      {/* Search */}
       <div className="flex flex-wrap gap-3 rounded-lg border border-border bg-bg-surface p-4">
         <div className="flex-1">
           <SearchInput
@@ -202,6 +322,7 @@ export default function UsersPage() {
         </div>
       </div>
 
+      {/* Table */}
       <div className="overflow-hidden rounded-lg border border-border bg-bg-surface">
         {loading ? (
           <div className="p-12 text-center text-sm text-fg-muted">
@@ -271,6 +392,23 @@ export default function UsersPage() {
                         <Button
                           size="sm"
                           variant="ghost"
+                          className={
+                            u.status === "active"
+                              ? "!text-danger hover:!bg-danger/10"
+                              : "!text-success hover:!bg-success/10"
+                          }
+                          onClick={() => handleToggleStatus(u)}
+                          title={
+                            u.status === "active"
+                              ? "Deactivate (logout all devices, block login)"
+                              : "Activate"
+                          }
+                        >
+                          {u.status === "active" ? "Deactivate" : "Activate"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           onClick={() => setResetFor(u)}
                           title="Reset password (logs out all devices)"
                         >
@@ -297,7 +435,7 @@ export default function UsersPage() {
       {/* Assign role modal */}
       {assigningFor && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4"
           onClick={() => setAssigningFor(null)}
         >
           <div
@@ -334,7 +472,7 @@ export default function UsersPage() {
       {/* Create user modal */}
       {createOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4"
           onClick={() => setCreateOpen(false)}
         >
           <form
@@ -373,36 +511,21 @@ export default function UsersPage() {
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-fg-muted">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={createDraft.password}
-                  onChange={(e) =>
-                    setCreateDraft({ ...createDraft, password: e.target.value })
-                  }
-                  className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-fg-muted">
-                  Confirm
-                </label>
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={createDraft.confirm}
-                  onChange={(e) =>
-                    setCreateDraft({ ...createDraft, confirm: e.target.value })
-                  }
-                  className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg"
-                />
-              </div>
+              <PasswordField
+                label="Password"
+                value={createDraft.password}
+                onChange={(v) =>
+                  setCreateDraft({ ...createDraft, password: v })
+                }
+                placeholder="Min 8 karakter"
+              />
+              <PasswordField
+                label="Confirm"
+                value={createDraft.confirm}
+                onChange={(v) => setCreateDraft({ ...createDraft, confirm: v })}
+                match={createMatch}
+                placeholder="Ulangi password"
+              />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-fg-muted">
@@ -433,7 +556,7 @@ export default function UsersPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" disabled={!canSubmitCreate}>
                 {submitting ? "Creating..." : "Create user"}
               </Button>
             </div>
@@ -444,7 +567,7 @@ export default function UsersPage() {
       {/* Reset password modal */}
       {resetFor && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4"
           onClick={() => setResetFor(null)}
         >
           <form
@@ -455,38 +578,21 @@ export default function UsersPage() {
             <h2 className="text-lg font-semibold text-fg">Reset password</h2>
             <p className="text-sm text-fg-muted">
               {resetFor.email} akan logout dari semua perangkat dan wajib login
-              ulang.
+              ulang. Password baru harus berbeda dari password saat ini.
             </p>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-fg-muted">
-                New password
-              </label>
-              <input
-                type="password"
-                required
-                minLength={8}
-                value={resetDraft.password}
-                onChange={(e) =>
-                  setResetDraft({ ...resetDraft, password: e.target.value })
-                }
-                className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-fg-muted">
-                Confirm
-              </label>
-              <input
-                type="password"
-                required
-                minLength={8}
-                value={resetDraft.confirm}
-                onChange={(e) =>
-                  setResetDraft({ ...resetDraft, confirm: e.target.value })
-                }
-                className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg"
-              />
-            </div>
+            <PasswordField
+              label="New password"
+              value={resetDraft.password}
+              onChange={(v) => setResetDraft({ ...resetDraft, password: v })}
+              placeholder="Min 8 karakter"
+            />
+            <PasswordField
+              label="Confirm"
+              value={resetDraft.confirm}
+              onChange={(v) => setResetDraft({ ...resetDraft, confirm: v })}
+              match={resetMatch}
+              placeholder="Ulangi password"
+            />
             <div className="flex justify-end gap-2 pt-2">
               <Button
                 type="button"
@@ -495,7 +601,7 @@ export default function UsersPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" disabled={!canSubmitReset}>
                 {submitting ? "Resetting..." : "Reset password"}
               </Button>
             </div>
