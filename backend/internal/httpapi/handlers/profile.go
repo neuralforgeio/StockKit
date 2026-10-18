@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -126,4 +127,60 @@ func (h *Profile) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "password_changed"})
+}
+
+// Get handles GET /api/v1/users/me/profile — full identity payload for the
+// profile page (everything except secrets): email, full name, status,
+// roles, and account creation date, straight from the database.
+func (h *Profile) Get(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requestClaims(r)
+	if !ok {
+		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
+		return
+	}
+	var email, fullName, status string
+	var createdAt time.Time
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT email, full_name, status, created_at
+		FROM users WHERE id = $1 AND tenant_id = $2`,
+		claims.Subject, claims.TenantID).Scan(&email, &fullName, &status, &createdAt)
+	if err == pgx.ErrNoRows {
+		httperr.Write(w, httperr.New("NOT_FOUND", http.StatusNotFound, "User not found"))
+		return
+	}
+	if err != nil {
+		httperr.Write(w, httperr.New("INTERNAL", http.StatusInternalServerError, "Failed to load profile"))
+		return
+	}
+
+	rows, err := h.pool.Query(r.Context(), `
+		SELECT r.name
+		FROM user_roles ur
+		JOIN roles r ON r.id = ur.role_id AND r.tenant_id = ur.tenant_id
+		WHERE ur.user_id = $1 AND ur.tenant_id = $2
+		ORDER BY r.name`, claims.Subject, claims.TenantID)
+	if err != nil {
+		httperr.Write(w, httperr.New("INTERNAL", http.StatusInternalServerError, "Failed to load roles"))
+		return
+	}
+	defer rows.Close()
+	roles := []string{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			httperr.Write(w, httperr.New("INTERNAL", http.StatusInternalServerError, "Failed to scan roles"))
+			return
+		}
+		roles = append(roles, n)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":         claims.Subject,
+		"tenant_id":  claims.TenantID,
+		"email":      email,
+		"full_name":  fullName,
+		"status":     status,
+		"roles":      roles,
+		"created_at": createdAt,
+	})
 }

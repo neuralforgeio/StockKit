@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api/client";
 import { API_BASE } from "@/lib/api/base";
 
-/* Password field with eye toggle + optional match indicator */
+/* ------------------------- Password field ------------------------- */
+
 function PasswordField({
   label,
   value,
@@ -88,23 +89,187 @@ function PasswordField({
   );
 }
 
+/* --------------------------- Crop modal --------------------------- */
+
+const VIEW = 288; // crop viewport (css px)
+const OUT = 512; // output size (px)
+
+function CropModal({
+  file,
+  onCancel,
+  onConfirm,
+}: {
+  file: File;
+  onCancel: () => void;
+  onConfirm: (blob: Blob) => void;
+}) {
+  const [img, setImg] = useState<HTMLImageElement | null>(null);
+  const [crop, setCrop] = useState({ zoom: 1, x: 0, y: 0 });
+  const drag = useRef<{ px: number; py: number; x: number; y: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => setImg(im);
+    im.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  const scale0 = img ? VIEW / Math.min(img.naturalWidth, img.naturalHeight) : 1;
+  const dw = img ? img.naturalWidth * scale0 * crop.zoom : VIEW;
+  const dh = img ? img.naturalHeight * scale0 * crop.zoom : VIEW;
+
+  const clamp = (c: { zoom: number; x: number; y: number }) => ({
+    zoom: c.zoom,
+    x: Math.min(0, Math.max(VIEW - dw, c.x)),
+    y: Math.min(0, Math.max(VIEW - dh, c.y)),
+  });
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { px: e.clientX, py: e.clientY, x: crop.x, y: crop.y };
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    const dx = e.clientX - drag.current.px;
+    const dy = e.clientY - drag.current.py;
+    const base = drag.current;
+    setCrop((c) => clamp({ ...c, x: base.x + dx, y: base.y + dy }));
+  };
+  const onPointerUp = () => {
+    drag.current = null;
+  };
+
+  const confirm = () => {
+    if (!img) return;
+    const s = scale0 * crop.zoom;
+    const sx = -crop.x / s;
+    const sy = -crop.y / s;
+    const sw = VIEW / s;
+    const sh = VIEW / s;
+    const canvas = document.createElement("canvas");
+    canvas.width = OUT;
+    canvas.height = OUT;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, OUT, OUT);
+    canvas.toBlob(
+      (b) => {
+        if (b) onConfirm(b);
+      },
+      "image/jpeg",
+      0.92,
+    );
+  };
+
+  return (
+    <div
+      className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick={onCancel}
+    >
+      <div
+        className="modal-pop w-full max-w-md rounded-xl border border-white/10 bg-[#151a21] p-6 shadow-2xl shadow-black/70 ring-1 ring-white/5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-lg font-semibold text-fg">Crop foto profil</h2>
+        <p className="mt-1 text-xs text-fg-muted">
+          Geser untuk memposisikan dan atur zoom. Hasil: kotak {OUT}×{OUT}px.
+        </p>
+
+        <div
+          className="mx-auto mt-4 touch-none select-none overflow-hidden rounded-lg border border-border bg-bg-subtle cursor-grab active:cursor-grabbing"
+          style={{ width: VIEW, height: VIEW }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+        >
+          {img && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={img.src}
+              alt="crop preview"
+              draggable={false}
+              className="block"
+              style={{
+                width: dw,
+                height: dh,
+                transform: `translate(${crop.x}px, ${crop.y}px)`,
+              }}
+            />
+          )}
+        </div>
+
+        <div className="mt-4 flex items-center gap-3">
+          <span className="text-xs text-fg-muted">Zoom</span>
+          <input
+            type="range"
+            min={1}
+            max={4}
+            step={0.05}
+            value={crop.zoom}
+            onChange={(e) =>
+              setCrop((c) =>
+                clamp({
+                  ...c,
+                  zoom: Math.min(4, Math.max(1, parseFloat(e.target.value))),
+                }),
+              )
+            }
+            className="flex-1"
+          />
+          <span className="w-12 text-right font-mono text-xs text-fg-muted">
+            {crop.zoom.toFixed(2)}×
+          </span>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button onClick={confirm} disabled={!img}>
+            Crop & Upload
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------ Page ------------------------------ */
+
+type ProfileData = {
+  id: string;
+  tenant_id: string;
+  email: string;
+  full_name: string;
+  status: string;
+  roles: string[];
+  created_at: string;
+};
+
 export default function ProfilePage() {
   const toast = useToast();
-  const [me, setMe] = useState<any>(null);
+  const [me, setMe] = useState<ProfileData | null>(null);
   const [fullName, setFullName] = useState("");
   const [savingName, setSavingName] = useState(false);
+
   const [avatarVersion, setAvatarVersion] = useState(0);
-  const [avatarOk, setAvatarOk] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [cropFile, setCropFile] = useState<File | null>(null);
 
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const [changingPw, setChangingPw] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const m = await apiFetch<any>("/users/me");
-      setMe(m);
-      setFullName(m?.full_name ?? m?.fullName ?? "");
+      const m = await apiFetch<any>("/users/me/profile");
+      const u: ProfileData = m?.data ?? m;
+      setMe(u);
+      setFullName(u?.full_name ?? "");
     } catch (err: any) {
       toast.error("Load failed", err.message);
     }
@@ -122,7 +287,7 @@ export default function ProfilePage() {
     match === true;
 
   const initials = useMemo(() => {
-    const src = (me?.full_name ?? me?.fullName ?? me?.email ?? "?") as string;
+    const src = me?.full_name || me?.email || "?";
     return src
       .split(/\s+/)
       .slice(0, 2)
@@ -148,11 +313,11 @@ export default function ProfilePage() {
     }
   };
 
-  const uploadAvatar = async (file: File) => {
+  const uploadBlob = async (blob: Blob) => {
     setUploading(true);
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", blob, "avatar.jpg");
       const csrf =
         document.cookie
           .split("; ")
@@ -165,13 +330,14 @@ export default function ProfilePage() {
         headers: { "X-CSRF-Token": csrf },
       });
       if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+      setAvatarFailed(false);
       setAvatarVersion((v) => v + 1);
-      setAvatarOk(true);
-      toast.success("Avatar updated", "Photo profile diperbarui.");
+      toast.success("Avatar updated", "Foto profil diperbarui.");
     } catch (err: any) {
       toast.error("Upload failed", err.message);
     } finally {
       setUploading(false);
+      setCropFile(null);
     }
   };
 
@@ -215,20 +381,32 @@ export default function ProfilePage() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* ---------- Identity ---------- */}
+        {/* ---------- Identity (prefilled from DB) ---------- */}
         <div className="space-y-6 rounded-xl border border-border bg-bg-surface p-6">
-          <h2 className="text-sm font-semibold text-fg">Identitas</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-fg">Identitas</h2>
+            {me && (
+              <span
+                className={`rounded px-2 py-0.5 text-xs font-medium ${
+                  me.status === "active"
+                    ? "bg-success/10 text-success"
+                    : "bg-bg-subtle text-fg-muted"
+                }`}
+              >
+                {me.status}
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center gap-4">
             <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-full border border-border bg-bg-subtle">
-              {avatarOk || me?.has_avatar ? (
+              {!avatarFailed ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={`${API_BASE}/users/me/avatar?v=${avatarVersion}`}
                   alt="avatar"
                   className="h-full w-full object-cover"
-                  onError={() => setAvatarOk(false)}
-                  onLoad={() => setAvatarOk(true)}
+                  onError={() => setAvatarFailed(true)}
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-lg font-semibold text-fg-muted">
@@ -247,14 +425,16 @@ export default function ProfilePage() {
                   disabled={uploading}
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (f) uploadAvatar(f);
+                    if (f) setCropFile(f); // buka modal crop, bukan upload langsung
                     e.target.value = "";
                   }}
                   className="block w-full text-xs text-fg-muted file:mr-3 file:rounded-md file:border-0 file:bg-bg-subtle file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-fg hover:file:bg-bg"
                 />
               </label>
               <p className="text-[11px] text-fg-subtle">
-                PNG/JPEG/WEBP. Tanpa avatar, inisial nama ditampilkan.
+                {uploading
+                  ? "Mengupload..."
+                  : "Pilih file → crop di modal → upload otomatis. Tanpa avatar, inisial nama ditampilkan."}
               </p>
             </div>
           </div>
@@ -279,6 +459,36 @@ export default function ProfilePage() {
                 disabled
                 className="w-full rounded-md border border-border bg-bg-subtle px-3 py-1.5 text-sm text-fg-muted"
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">
+                Roles
+              </label>
+              <div className="flex flex-wrap gap-1">
+                {(me?.roles ?? []).map((r) => (
+                  <span
+                    key={r}
+                    className="rounded bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent"
+                  >
+                    {r}
+                  </span>
+                ))}
+                {(me?.roles ?? []).length === 0 && (
+                  <span className="text-xs text-fg-subtle">—</span>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">
+                Anggota sejak
+              </label>
+              <div className="text-sm text-fg">
+                {me?.created_at
+                  ? new Date(me.created_at).toLocaleDateString("id-ID", {
+                      dateStyle: "long",
+                    })
+                  : "—"}
+              </div>
             </div>
             <Button type="submit" disabled={savingName || !fullName.trim()}>
               {savingName ? "Saving..." : "Save changes"}
@@ -319,6 +529,15 @@ export default function ProfilePage() {
           </form>
         </div>
       </div>
+
+      {/* Crop modal */}
+      {cropFile && (
+        <CropModal
+          file={cropFile}
+          onCancel={() => setCropFile(null)}
+          onConfirm={uploadBlob}
+        />
+      )}
     </div>
   );
 }

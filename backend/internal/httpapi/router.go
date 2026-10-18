@@ -355,6 +355,7 @@ func New(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, rdb *redi
 				r.Patch("/me", usersH.UpdateMe)
 				r.Post("/me/avatar", usersH.UploadAvatar)
 				r.Get("/me/avatar", usersH.GetAvatar)
+				r.Get("/me/profile", profileH.Get)
 				r.Post("/me/password", profileH.ChangePassword)
 			})
 
