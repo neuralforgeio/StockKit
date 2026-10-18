@@ -134,11 +134,11 @@ function ConfirmModal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4"
+      className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
       onClick={onCancel}
     >
       <div
-        className="w-full max-w-sm rounded-lg border border-border bg-bg-surface p-6"
+        className="w-full max-w-sm modal-pop rounded-xl border border-white/10 bg-[#151a21] p-6 shadow-2xl shadow-black/70 ring-1 ring-white/5"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold text-fg">{title}</h2>
@@ -530,11 +530,11 @@ export default function UsersPage() {
       {/* Assign role modal */}
       {assigningFor && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4"
+          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
           onClick={() => setAssigningFor(null)}
         >
           <div
-            className="w-full max-w-md rounded-lg border border-border bg-bg-surface p-6"
+            className="w-full max-w-md modal-pop rounded-xl border border-white/10 bg-[#151a21] p-6 shadow-2xl shadow-black/70 ring-1 ring-white/5"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-lg font-semibold text-fg">
@@ -567,11 +567,11 @@ export default function UsersPage() {
       {/* Create user modal */}
       {createOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4"
+          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
           onClick={() => setCreateOpen(false)}
         >
           <form
-            className="w-full max-w-md space-y-4 rounded-lg border border-border bg-bg-surface p-6"
+            className="w-full max-w-md space-y-4 modal-pop rounded-xl border border-white/10 bg-[#151a21] p-6 shadow-2xl shadow-black/70 ring-1 ring-white/5"
             onClick={(e) => e.stopPropagation()}
             onSubmit={handleCreate}
           >
@@ -662,11 +662,11 @@ export default function UsersPage() {
       {/* Reset password modal */}
       {resetFor && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4"
+          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
           onClick={() => setResetFor(null)}
         >
           <form
-            className="w-full max-w-sm space-y-4 rounded-lg border border-border bg-bg-surface p-6"
+            className="w-full max-w-sm space-y-4 modal-pop rounded-xl border border-white/10 bg-[#151a21] p-6 shadow-2xl shadow-black/70 ring-1 ring-white/5"
             onClick={(e) => e.stopPropagation()}
             onSubmit={handleReset}
           >

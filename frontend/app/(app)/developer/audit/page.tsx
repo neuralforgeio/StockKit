@@ -8,9 +8,13 @@ import { SearchInput } from "@/components/ui/search-input";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api/client";
 import { API_BASE } from "@/lib/api/base";
+import { resolveLabels } from "@/lib/api/lookup";
 import { fuzzyMatch } from "@/lib/fuzzy";
-import { realtime } from "@/lib/realtime";
 import { formatAuditValue } from "@/lib/format-audit";
+import { realtime } from "@/lib/realtime";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type AuditLog = {
   id: number;
@@ -24,8 +28,6 @@ type AuditLog = {
   metadata: any;
   created_at: string;
 };
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default function AuditLogsPage() {
   const toast = useToast();
@@ -43,7 +45,7 @@ export default function AuditLogsPage() {
   const [selected, setSelected] = useState<AuditLog | null>(null);
   const [labels, setLabels] = useState<Record<string, string>>({});
 
-  // Load data dengan AbortController + 15s timeout untuk mencegah "Loading..." forever
+  // Load dengan AbortController + hard timeout 15s (anti "Loading..." forever)
   const load = useCallback(async () => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15000);
@@ -74,22 +76,21 @@ export default function AuditLogsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter.from, filter.to, filter.entityType]);
 
-  // Load on mount & filter change
   useEffect(() => {
     load();
   }, [load]);
 
   // Subscribe ke SATU WebSocket bersama (dimiliki topbar via realtime.ts).
   // Event audit tiba sebagai kind === "audit_event" → refresh tabel.
-  // Hindari koneksi persisten kedua per tab (browser limit 6 socket/host).
   useEffect(() => {
     const off = realtime.on((ev) => {
-      if (ev.kind === "audit_event") load();
+      if (ev.kind === "audit_event") {
+        load();
+      }
     });
     return off;
   }, [load]);
 
-  // Filter client-side via fuzzy match
   const filtered = useMemo(
     () =>
       logs.filter((l) =>
@@ -103,13 +104,11 @@ export default function AuditLogsPage() {
     [logs, query],
   );
 
-  // Entity type options (unik dari data yang ada)
   const entityTypeOptions = useMemo(() => {
     const set = new Set(logs.map((l) => l.entity_type));
     return Array.from(set).sort();
   }, [logs]);
 
-  // Export handler (Excel / JSON via backend /audit-logs/export)
   const handleExport = (format: "xlsx" | "json") => {
     const params = new URLSearchParams({ format });
     if (filter.from) params.set("from", filter.from);
@@ -117,14 +116,13 @@ export default function AuditLogsPage() {
     window.open(`${API_BASE}/audit-logs/export?${params.toString()}`, "_blank");
   };
 
-  // Render nilai untuk diff view
+  // Raw renderer: dipakai untuk DETEKSI perubahan (equality), bukan tampilan.
   const renderValue = (v: any): string => {
     if (v === null || v === undefined) return "—";
     if (typeof v === "object") return JSON.stringify(v);
     return String(v);
   };
 
-  // Hitung diff antara old_data dan new_data
   const diff = useMemo(() => {
     if (!selected) return [];
     const old = selected.old_data ?? {};
@@ -135,7 +133,6 @@ export default function AuditLogsPage() {
     ]);
     const rows: { field: string; oldVal: any; newVal: any }[] = [];
     for (const k of keys) {
-      // Skip system fields
       if (["id", "tenant_id", "created_at", "updated_at"].includes(k)) continue;
       const ov = old?.[k];
       const nv = neo?.[k];
@@ -146,7 +143,42 @@ export default function AuditLogsPage() {
     return rows;
   }, [selected]);
 
-  
+  // Best-effort UUID→label resolution untuk modal detail yang terbuka.
+  useEffect(() => {
+    if (!selected) return;
+    const ids = new Set<string>();
+    if (UUID_RE.test(selected.entity_id)) ids.add(selected.entity_id);
+    if (selected.actor_user_id && UUID_RE.test(selected.actor_user_id)) {
+      ids.add(selected.actor_user_id);
+    }
+    for (const d of diff) {
+      for (const v of [d.oldVal, d.newVal]) {
+        if (typeof v === "string" && UUID_RE.test(v)) ids.add(v);
+      }
+    }
+    const missing = [...ids].filter((id) => !labels[id]);
+    if (missing.length === 0) return;
+    let alive = true;
+    resolveLabels(missing)
+      .then((res) => {
+        if (alive) setLabels((prev) => ({ ...prev, ...res }));
+      })
+      .catch(() => {
+        /* labels best-effort: biarkan UUID mentah bila gagal */
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, diff]);
+
+  // Tampilan diff: UUID → label bila dikenal, selain itu formatter pintar.
+  const displayDiff = (field: string, val: any): string => {
+    if (typeof val === "string" && UUID_RE.test(val)) {
+      return labels[val] ?? val;
+    }
+    return formatAuditValue(field, val);
+  };
 
   return (
     <div className="space-y-6">
@@ -314,11 +346,11 @@ export default function AuditLogsPage() {
       {/* Detail modal */}
       {selected && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
           onClick={() => setSelected(null)}
         >
           <div
-            className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg border border-border bg-bg-surface p-6"
+            className="max-h-[85vh] w-full max-w-3xl overflow-auto modal-pop rounded-xl border border-white/10 bg-[#151a21] p-6 shadow-2xl shadow-black/70 ring-1 ring-white/5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">
@@ -350,14 +382,22 @@ export default function AuditLogsPage() {
               </div>
               <div>
                 <div className="text-xs text-fg-muted">Entity ID</div>
-                <div className="font-mono text-xs text-fg">
-                  {selected.entity_id}
+                <div
+                  className="font-mono text-xs text-fg"
+                  title={selected.entity_id}
+                >
+                  {labels[selected.entity_id] ?? selected.entity_id}
                 </div>
               </div>
               <div className="col-span-2">
                 <div className="text-xs text-fg-muted">Actor</div>
-                <div className="font-mono text-xs text-fg">
-                  {selected.actor_user_id ?? "system"}
+                <div
+                  className="font-mono text-xs text-fg"
+                  title={selected.actor_user_id ?? undefined}
+                >
+                  {selected.actor_user_id
+                    ? (labels[selected.actor_user_id] ?? selected.actor_user_id)
+                    : "system"}
                 </div>
               </div>
             </div>
@@ -386,11 +426,21 @@ export default function AuditLogsPage() {
                         <td className="px-3 py-2 font-mono text-xs font-medium text-fg">
                           {d.field}
                         </td>
-                        <td className="px-3 py-2 font-mono text-xs text-danger">
-                          {formatAuditValue(d.field, d.oldVal)}
+                        <td
+                          className="px-3 py-2 font-mono text-xs text-danger"
+                          title={
+                            typeof d.oldVal === "string" ? d.oldVal : undefined
+                          }
+                        >
+                          {displayDiff(d.field, d.oldVal)}
                         </td>
-                        <td className="px-3 py-2 font-mono text-xs text-success">
-                          {formatAuditValue(d.field, d.newVal)}
+                        <td
+                          className="px-3 py-2 font-mono text-xs text-success"
+                          title={
+                            typeof d.newVal === "string" ? d.newVal : undefined
+                          }
+                        >
+                          {displayDiff(d.field, d.newVal)}
                         </td>
                       </tr>
                     ))}
