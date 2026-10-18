@@ -129,7 +129,7 @@ func serve() error {
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.APIPort),
-		Handler:           httpapi.New(logger, pool, rdb, kp, cipher),
+		Handler:           httpapi.New(ctx, logger, pool, rdb, kp, cipher),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -157,6 +157,12 @@ func serve() error {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 	logger.Info("server stopped cleanly")
+	// Guard: force exit if any goroutine (audit listener, realtime poller)
+	// fails to terminate within 2 seconds. Prevents terminal hang on Ctrl+C.
+	go func() {
+		time.Sleep(2 * time.Second)
+		os.Exit(0)
+	}()
 	return nil
 }
 

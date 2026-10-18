@@ -36,7 +36,7 @@ import (
 	"github.com/neuralforgeio/StockKit/internal/warehouses"
 )
 
-func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.KeyPair, cipher *fieldcipher.Cipher) http.Handler {
+func New(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.KeyPair, cipher *fieldcipher.Cipher) http.Handler {
 	sys := handlers.NewSystem(pool, rdb)
 	authH := handlers.NewAuth(pool, kp, logger)
 
@@ -136,7 +136,7 @@ func New(logger *slog.Logger, pool *pgxpool.Pool, rdb *redis.Client, kp *auth.Ke
 	// Audit events pushed over the SINGLE shared realtime WebSocket
 	// (per-user connection owned by the topbar) — avoids a second
 	// persistent connection per page (browser 6-conn/host HTTP/1.1 limit).
-	audit.StartListener(context.Background(), pool, logger, func(tenantID string, payload map[string]any) {
+	audit.StartListener(ctx, pool, logger, func(tenantID string, payload map[string]any) {
 		rtHub.BroadcastTenant(tenantID, realtime.Event{
 			Kind:      "audit_event",
 			Title:     fmt.Sprintf("%v %v", payload["event_type"], payload["entity_type"]),
