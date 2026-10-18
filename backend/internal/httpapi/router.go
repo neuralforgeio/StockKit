@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -145,6 +146,18 @@ func New(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, rdb *redi
 			DocType:   fmt.Sprintf("%v", payload["entity_type"]),
 			DocID:     fmt.Sprintf("%v", payload["entity_id"]),
 			CreatedAt: fmt.Sprintf("%v", payload["created_at"]),
+		})
+	})
+	// Profile changes (any write path) → push to all tenant clients.
+	realtime.StartProfileListener(ctx, pool, logger, func(tenantID string, payload map[string]any) {
+		body, _ := json.Marshal(payload)
+		rtHub.BroadcastTenant(tenantID, realtime.Event{
+			Kind:      "profile_updated",
+			Title:     "Profile updated",
+			Body:      string(body),
+			DocType:   "users",
+			DocID:     fmt.Sprintf("%v", payload["user_id"]),
+			CreatedAt: time.Now().Format(time.RFC3339),
 		})
 	})
 
