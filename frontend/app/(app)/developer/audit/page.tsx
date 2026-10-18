@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/api/client";
 import { API_BASE } from "@/lib/api/base";
 import { fuzzyMatch } from "@/lib/fuzzy";
 import { realtime } from "@/lib/realtime";
+import { formatAuditValue } from "@/lib/format-audit";
 
 type AuditLog = {
   id: number;
@@ -381,10 +382,10 @@ export default function AuditLogsPage() {
                           {d.field}
                         </td>
                         <td className="px-3 py-2 font-mono text-xs text-danger">
-                          {renderValue(d.oldVal)}
+                          {formatAuditValue(d.field, d.oldVal)}
                         </td>
                         <td className="px-3 py-2 font-mono text-xs text-success">
-                          {renderValue(d.newVal)}
+                          {formatAuditValue(d.field, d.newVal)}
                         </td>
                       </tr>
                     ))}

@@ -113,6 +113,53 @@ function PasswordField({
   );
 }
 
+/* ------------------------- Custom confirm modal ------------------------- */
+
+function ConfirmModal({
+  title,
+  description,
+  confirmLabel,
+  danger,
+  loading,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  danger?: boolean;
+  loading?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm rounded-lg border border-border bg-bg-surface p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-lg font-semibold text-fg">{title}</h2>
+        <p className="mt-2 text-sm text-fg-muted">{description}</p>
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel} disabled={loading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={onConfirm}
+            disabled={loading}
+            className={danger ? "!bg-danger hover:!bg-danger/90" : undefined}
+          >
+            {loading ? "Processing..." : confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------- Page -------------------------------- */
 
 export default function UsersPage() {
@@ -133,6 +180,14 @@ export default function UsersPage() {
     roles: [] as string[],
   });
   const [resetDraft, setResetDraft] = useState({ password: "", confirm: "" });
+
+  type ConfirmAction =
+    | { kind: "revoke"; user: ManagedUser; role: string }
+    | { kind: "status"; user: ManagedUser };
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(
+    null,
+  );
+  const [confirmLoading, setConfirmLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -194,19 +249,12 @@ export default function UsersPage() {
     }
   };
 
-  const handleRevoke = async (user: ManagedUser, roleName: string) => {
+  const handleRevoke = (user: ManagedUser, roleName: string) => {
     if (roleName === "developer" && user.roles.length === 1) {
       toast.error("Cannot revoke", "User must have at least one role");
       return;
     }
-    if (!confirm(`Revoke "${roleName}" from ${user.email}?`)) return;
-    try {
-      const updated = await revokeRoleMgmt(user.id, roleName);
-      setUsers((prev) => prev.map((x) => (x.id === user.id ? updated : x)));
-      toast.success("Role revoked", `${roleName} removed from ${user.email}`);
-    } catch (err: any) {
-      toast.error("Revoke failed", err.message);
-    }
+    setConfirmAction({ kind: "revoke", user, role: roleName });
   };
 
   const toggleDraftRole = (name: string) =>
@@ -265,25 +313,72 @@ export default function UsersPage() {
     }
   };
 
-  const handleToggleStatus = async (u: ManagedUser) => {
-    const next = u.status === "active" ? "inactive" : "active";
-    const label = next === "inactive" ? "Deactivate" : "Activate";
-    if (
-      !confirm(
-        `${label} ${u.email}?${next === "inactive" ? " User akan logout dari semua perangkat dan tidak bisa login." : ""}`,
-      )
-    )
-      return;
-    try {
-      const updated = await setUserStatusMgmt(u.id, next);
-      setUsers((prev) => prev.map((x) => (x.id === u.id ? updated : x)));
-      toast.success(
-        next === "inactive" ? "Deactivated" : "Activated",
-        `${u.email} is now ${next}.`,
-      );
-    } catch (err: any) {
-      toast.error(`${label} failed`, err.message);
+  const confirmMeta = useMemo(() => {
+    if (!confirmAction) return null;
+    if (confirmAction.kind === "revoke") {
+      return {
+        title: `Revoke role "${confirmAction.role}"?`,
+        description: `Role akan dilepas dari ${confirmAction.user.email}. Perubahan berlaku pada request berikutnya (auto permission refresh).`,
+        label: "Revoke role",
+        danger: true,
+      };
     }
+    const deactivating = confirmAction.user.status === "active";
+    return deactivating
+      ? {
+          title: `Deactivate ${confirmAction.user.email}?`,
+          description:
+            "User akan logout dari semua perangkat dan tidak dapat login sampai diaktifkan kembali.",
+          label: "Deactivate",
+          danger: true,
+        }
+      : {
+          title: `Activate ${confirmAction.user.email}?`,
+          description:
+            "User dapat login kembali menggunakan password saat ini.",
+          label: "Activate",
+          danger: false,
+        };
+  }, [confirmAction]);
+
+  const runConfirm = async () => {
+    if (!confirmAction) return;
+    setConfirmLoading(true);
+    try {
+      if (confirmAction.kind === "revoke") {
+        const updated = await revokeRoleMgmt(
+          confirmAction.user.id,
+          confirmAction.role,
+        );
+        setUsers((prev) =>
+          prev.map((x) => (x.id === updated.id ? updated : x)),
+        );
+        toast.success(
+          "Role revoked",
+          `${confirmAction.role} removed from ${confirmAction.user.email}`,
+        );
+      } else {
+        const next =
+          confirmAction.user.status === "active" ? "inactive" : "active";
+        const updated = await setUserStatusMgmt(confirmAction.user.id, next);
+        setUsers((prev) =>
+          prev.map((x) => (x.id === updated.id ? updated : x)),
+        );
+        toast.success(
+          next === "inactive" ? "Deactivated" : "Activated",
+          `${updated.email} is now ${next}.`,
+        );
+      }
+    } catch (err: any) {
+      toast.error("Action failed", err.message);
+    } finally {
+      setConfirmLoading(false);
+      setConfirmAction(null);
+    }
+  };
+
+  const handleToggleStatus = (u: ManagedUser) => {
+    setConfirmAction({ kind: "status", user: u });
   };
 
   return (
@@ -607,6 +702,19 @@ export default function UsersPage() {
             </div>
           </form>
         </div>
+      )}
+
+      {/* Custom confirm modal (replaces native window.confirm) */}
+      {confirmAction && confirmMeta && (
+        <ConfirmModal
+          title={confirmMeta.title}
+          description={confirmMeta.description}
+          confirmLabel={confirmMeta.label}
+          danger={confirmMeta.danger}
+          loading={confirmLoading}
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={runConfirm}
+        />
       )}
     </div>
   );
