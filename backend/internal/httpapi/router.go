@@ -345,6 +345,7 @@ func New(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, rdb *redi
 			// PATCH RBAC: audit-logs hanya untuk developer + auditor
 			r.With(middleware.RequireRole(pool, "developer", "auditor"), chimw.Timeout(30*time.Second)).Get("/audit-logs", auditH.List)
 			r.With(middleware.RequireRole(pool, "developer", "auditor")).Get("/audit-logs/export", auditH.Export)
+			r.With(middleware.RequireRole(pool, "developer", "auditor")).Post("/audit-logs/resolve", auditH.Resolve)
 			r.With(middleware.RequireRole(pool, "developer", "auditor")).Get("/audit-logs/ws", auditWSH.ServeWS)
 
 			r.Get("/dashboard/summary", dashboardH.Summary)

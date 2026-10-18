@@ -25,6 +25,8 @@ type AuditLog = {
   created_at: string;
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export default function AuditLogsPage() {
   const toast = useToast();
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -39,6 +41,7 @@ export default function AuditLogsPage() {
     entityType: "",
   });
   const [selected, setSelected] = useState<AuditLog | null>(null);
+  const [labels, setLabels] = useState<Record<string, string>>({});
 
   // Load data dengan AbortController + 15s timeout untuk mencegah "Loading..." forever
   const load = useCallback(async () => {
@@ -142,6 +145,8 @@ export default function AuditLogsPage() {
     }
     return rows;
   }, [selected]);
+
+  
 
   return (
     <div className="space-y-6">

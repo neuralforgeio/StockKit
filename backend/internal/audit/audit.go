@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -159,6 +160,51 @@ func (r *Repository) Export(ctx context.Context, tenantID string, from, to time.
 		e.NewData = json.RawMessage(newStr)
 		e.Metadata = json.RawMessage(metaStr)
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// ResolveLabels maps entity UUIDs to human-readable labels across core
+// tables (users, customers, products, warehouses, suppliers, cash accounts).
+// Non-UUID inputs are silently ignored to keep the UNION query safe.
+func (r *Repository) ResolveLabels(ctx context.Context, tenantID string, ids []string) (map[string]string, error) {
+	out := map[string]string{}
+	safe := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if uuidRe.MatchString(id) {
+			safe = append(safe, id)
+		}
+	}
+	if len(safe) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, label FROM (
+			SELECT id, COALESCE(NULLIF(full_name, ''), email) AS label
+			FROM users WHERE tenant_id = $1 AND id = ANY($2)
+			UNION ALL
+			SELECT id, code || ' - ' || name FROM customers WHERE tenant_id = $1 AND id = ANY($2)
+			UNION ALL
+			SELECT id, sku || ' - ' || name FROM products WHERE tenant_id = $1 AND id = ANY($2)
+			UNION ALL
+			SELECT id, code || ' - ' || name FROM warehouses WHERE tenant_id = $1 AND id = ANY($2)
+			UNION ALL
+			SELECT id, code || ' - ' || name FROM suppliers WHERE tenant_id = $1 AND id = ANY($2)
+			UNION ALL
+			SELECT id, name FROM cash_accounts WHERE tenant_id = $1 AND id = ANY($2)
+		) t`, tenantID, safe)
+	if err != nil {
+		return nil, fmt.Errorf("resolve labels: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, label string
+		if err := rows.Scan(&id, &label); err != nil {
+			return nil, fmt.Errorf("scan label: %w", err)
+		}
+		out[id] = label
 	}
 	return out, rows.Err()
 }

@@ -267,3 +267,31 @@ func (h *Audit) Export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=audit-logs-%s.xlsx", stamp))
 	_, _ = w.Write(buf.Bytes())
 }
+
+type resolvePayload struct {
+	IDs []string `json:"ids"`
+}
+
+// Resolve handles POST /api/v1/audit-logs/resolve — batch UUID→label lookup
+// for the audit diff UI. Capped at 200 ids per request.
+func (h *Audit) Resolve(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requestClaims(r)
+	if !ok {
+		httperr.Write(w, httperr.New("AUTH_FAILED", http.StatusUnauthorized, "Missing claims"))
+		return
+	}
+	var payload resolvePayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		httperr.Write(w, httperr.New("VALIDATION_FAILED", http.StatusUnprocessableEntity, "Invalid request body"))
+		return
+	}
+	if len(payload.IDs) > 200 {
+		payload.IDs = payload.IDs[:200]
+	}
+	labels, err := h.repo.ResolveLabels(r.Context(), claims.TenantID, payload.IDs)
+	if err != nil {
+		httperr.Write(w, httperr.Wrap("RESOLVE_FAILED", http.StatusInternalServerError, "Failed to resolve labels", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"labels": labels})
+}
