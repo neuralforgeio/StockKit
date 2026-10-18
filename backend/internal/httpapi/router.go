@@ -123,6 +123,7 @@ func New(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, rdb *redi
 	dashboardH := handlers.NewDashboard(dashboardSvc)
 
 	usersH := handlers.NewUsers(pool)
+	profileH := handlers.NewProfile(pool)
 
 	usersMgmtRepo := users.NewRepository(pool)
 	usersMgmtH := handlers.NewUsersMgmt(usersMgmtRepo)
@@ -354,6 +355,7 @@ func New(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, rdb *redi
 				r.Patch("/me", usersH.UpdateMe)
 				r.Post("/me/avatar", usersH.UploadAvatar)
 				r.Get("/me/avatar", usersH.GetAvatar)
+				r.Post("/me/password", profileH.ChangePassword)
 			})
 
 			r.Route("/users-mgmt", func(r chi.Router) {

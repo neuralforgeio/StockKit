@@ -44,10 +44,10 @@ func (h *Users) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
-		"user_id":   claims.Subject,
-		"tenant_id": claims.TenantID,
-		"full_name": fullName,
-		"email":     email,
+		"user_id":    claims.Subject,
+		"tenant_id":  claims.TenantID,
+		"full_name":  fullName,
+		"email":      email,
 		"has_avatar": hasAvatar,
 	}})
 }
@@ -126,7 +126,9 @@ func (h *Users) GetAvatar(w http.ResponseWriter, r *http.Request) {
 		WHERE id = $1 AND tenant_id = $2`,
 		claims.Subject, claims.TenantID).Scan(&mime, &data)
 	if err != nil || data == nil {
-		httperr.Write(w, httperr.New("NOT_FOUND", http.StatusNotFound, "Avatar not set"))
+		// No avatar set: 204 keeps the browser console clean; the client
+		// renders the initials fallback on empty/error response.
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	w.Header().Set("Content-Type", mime)
