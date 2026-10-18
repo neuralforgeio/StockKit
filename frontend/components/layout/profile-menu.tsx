@@ -1,109 +1,104 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { getMe } from "@/lib/api/users";
-import { logout } from "@/lib/api/auth";
-import { useTheme } from "@/lib/theme";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { apiFetch } from "@/lib/api/client";
+import { API_BASE } from "@/lib/api/base";
+import { useCurrentUser } from "@/lib/current-user";
 
-type Me = { full_name: string; email: string };
-
-const THEME_OPTIONS = [
-  {
-    value: "light",
-    label: "Light",
-    icon: "M12 3v2M12 19v2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M3 12h2M19 12h2M5.2 18.8l1.4-1.4M17.4 6.6l1.4-1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
-  },
-  {
-    value: "dark",
-    label: "Dark",
-    icon: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z",
-  },
-  {
-    value: "system",
-    label: "System",
-    icon: "M2 5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5zM8 21h8M12 17v4",
-  },
-] as const;
-
+/**
+ * Sidebar profile block: avatar + identity (live via useCurrentUser store)
+ * with an upward dropdown menu (Profile / Settings / Logout).
+ * Identity updates instantly when a profile_updated WS event arrives —
+ * no polling, no reload.
+ */
 export function ProfileMenu({ collapsed }: { collapsed: boolean }) {
+  const me = useCurrentUser();
   const [open, setOpen] = useState(false);
-  const [themeOpen, setThemeOpen] = useState(false);
-  const [me, setMe] = useState<Me | null>(null);
-  const [avatar, setAvatar] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-  const { theme, setTheme } = useTheme();
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const [avatarV, setAvatarV] = useState(0);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
 
+  // Close on outside click
   useEffect(() => {
-    getMe()
-      .then((m) => setMe({ full_name: m.full_name, email: m.email }))
-      .catch(() => undefined);
-    fetch("/api/v1/users/me/avatar", { credentials: "include" })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const blob = await res.blob();
-        setAvatar(URL.createObjectURL(blob));
-      })
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false);
-        setThemeOpen(false);
       }
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+  }, []);
 
-  const handleLogout = async () => {
-    await logout();
-    window.location.assign("/login");
+  // Refresh avatar when the profile page uploads a new one
+  useEffect(() => {
+    const bump = () => {
+      setAvatarFailed(false);
+      setAvatarV((v) => v + 1);
+    };
+    window.addEventListener("stockkit:avatar-changed", bump);
+    return () => window.removeEventListener("stockkit:avatar-changed", bump);
+  }, []);
+
+  const initials = useMemo(() => {
+    const src = me?.full_name || me?.email || "?";
+    return src
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((p) => p[0]?.toUpperCase() ?? "")
+      .join("");
+  }, [me]);
+
+  const logout = async () => {
+    setLoggingOut(true);
+    try {
+      await apiFetch("/auth/logout", { method: "POST" });
+    } catch {
+      /* session dibersihkan server-side best-effort; tetap redirect */
+    }
+    window.location.href = "/login";
   };
 
-  const initials = (me?.full_name ?? "?")
-    .split(" ")
-    .map((p) => p[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-
-  const currentTheme = THEME_OPTIONS.find((t) => t.value === theme);
-
   return (
-    <div className="relative" ref={ref}>
+    <div ref={ref} className="relative">
+      {/* Trigger */}
       <button
-        onClick={() => setOpen((v) => !v)}
-        className={`flex w-full items-center gap-2.5 rounded-lg p-2 transition-colors hover:bg-bg-subtle ${collapsed ? "justify-center" : ""}`}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`flex w-full items-center rounded-lg transition hover:bg-bg-subtle ${
+          collapsed ? "justify-center p-1.5" : "gap-2.5 p-2"
+        }`}
       >
-        {avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={avatar}
-            alt=""
-            className="h-8 w-8 shrink-0 rounded-full object-cover"
-          />
-        ) : (
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-subtle text-xs font-semibold text-accent">
-            {initials}
-          </span>
-        )}
+        <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full border border-border bg-bg-subtle">
+          {!avatarFailed ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`${API_BASE}/users/me/avatar?v=${avatarV}`}
+              alt="avatar"
+              className="h-full w-full object-cover"
+              onError={() => setAvatarFailed(true)}
+            />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center text-xs font-semibold text-fg-muted">
+              {initials || "?"}
+            </span>
+          )}
+        </span>
         {!collapsed && (
           <>
             <span className="min-w-0 flex-1 text-left">
               <span className="block truncate text-sm font-medium text-fg">
-                {me?.full_name ?? "…"}
+                {me?.full_name || "Loading..."}
               </span>
-              <span className="block truncate text-xs text-fg-subtle">
-                {me?.email ?? ""}
+              <span className="block truncate text-[11px] text-fg-subtle">
+                {me?.email || ""}
               </span>
             </span>
             <svg
-              width="14"
-              height="14"
+              width="12"
+              height="12"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -117,152 +112,96 @@ export function ProfileMenu({ collapsed }: { collapsed: boolean }) {
         )}
       </button>
 
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 6 }}
-            transition={{ duration: 0.15 }}
-            className="absolute bottom-full left-0 z-50 mb-2 w-64 overflow-hidden rounded-xl border border-border bg-bg shadow-[0_16px_48px_rgba(10,14,20,0.35)]"
+      {/* Dropdown (opens upward) */}
+      {open && (
+        <div
+          role="menu"
+          className="modal-pop absolute bottom-full left-0 z-50 mb-2 w-56 overflow-hidden rounded-xl border border-white/10 bg-[#151a21] p-1 shadow-2xl shadow-black/70 ring-1 ring-white/5"
+        >
+          <div className="border-b border-border px-3 py-2">
+            <div className="truncate text-sm font-medium text-fg">
+              {me?.full_name || "—"}
+            </div>
+            <div className="truncate text-[11px] text-fg-subtle">
+              {me?.email || "—"}
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {(me?.roles ?? []).slice(0, 3).map((r) => (
+                <span
+                  key={r}
+                  className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent"
+                >
+                  {r}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <Link
+            href="/settings/profile"
+            onClick={() => setOpen(false)}
+            role="menuitem"
+            className="mt-1 flex items-center gap-2 rounded-md px-3 py-2 text-sm text-fg-muted transition hover:bg-bg-subtle hover:text-fg"
           >
-            {/* Header: avatar kiri + nama + email */}
-            <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-              {avatar ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={avatar}
-                  alt=""
-                  className="h-10 w-10 shrink-0 rounded-full object-cover"
-                />
-              ) : (
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent-subtle text-sm font-semibold text-accent">
-                  {initials}
-                </span>
-              )}
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-semibold text-fg">
-                  {me?.full_name ?? "…"}
-                </span>
-                <span className="block truncate text-xs text-fg-subtle">
-                  {me?.email ?? ""}
-                </span>
-              </span>
-            </div>
-
-            {/* Theme: tombol ber-chevron yang expand */}
-            <div className="border-b border-border">
-              <button
-                onClick={() => setThemeOpen((v) => !v)}
-                className="flex w-full items-center justify-between px-4 py-2.5 text-sm text-fg transition-colors hover:bg-bg-subtle"
-              >
-                <span className="flex items-center gap-2">
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    aria-hidden
-                  >
-                    <path d={currentTheme?.icon ?? THEME_OPTIONS[2].icon} />
-                  </svg>
-                  Theme
-                </span>
-                <span className="flex items-center gap-1 text-xs text-fg-subtle">
-                  {currentTheme?.label}
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    className={`transition-transform ${themeOpen ? "rotate-90" : ""}`}
-                    aria-hidden
-                  >
-                    <path d="M9 18l6-6-6-6" />
-                  </svg>
-                </span>
-              </button>
-              <AnimatePresence initial={false}>
-                {themeOpen && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.15 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="space-y-0.5 px-2 pb-2">
-                      {THEME_OPTIONS.map((opt) => (
-                        <button
-                          key={opt.value}
-                          onClick={() => {
-                            setTheme(opt.value);
-                            setThemeOpen(false);
-                          }}
-                          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
-                            theme === opt.value
-                              ? "bg-accent-subtle text-accent"
-                              : "text-fg-muted hover:bg-bg-subtle hover:text-fg"
-                          }`}
-                        >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                            aria-hidden
-                          >
-                            <path d={opt.icon} />
-                          </svg>
-                          {opt.label}
-                          {theme === opt.value && (
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              className="ml-auto"
-                              aria-hidden
-                            >
-                              <path d="M20 6 9 17l-5-5" />
-                            </svg>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <button
-              onClick={handleLogout}
-              className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-danger transition-colors hover:bg-danger/10"
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden
             >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                aria-hidden
-              >
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
-              </svg>
-              Sign out
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+            My profile
+          </Link>
+          <Link
+            href="/settings"
+            onClick={() => setOpen(false)}
+            role="menuitem"
+            className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-fg-muted transition hover:bg-bg-subtle hover:text-fg"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            Settings
+          </Link>
+
+          <div className="my-1 h-px bg-border" />
+          <button
+            onClick={logout}
+            disabled={loggingOut}
+            role="menuitem"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-danger transition hover:bg-danger/10 disabled:opacity-60"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            {loggingOut ? "Signing out..." : "Sign out"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

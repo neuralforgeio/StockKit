@@ -6,6 +6,11 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api/client";
 import { API_BASE } from "@/lib/api/base";
+import {
+  loadCurrentUser,
+  setCurrentUser,
+  useCurrentUser,
+} from "@/lib/current-user";
 
 /* ------------------------- Password field ------------------------- */
 
@@ -179,7 +184,7 @@ function CropModal({
         </p>
 
         <div
-          className="mx-auto mt-4 touch-none select-none overflow-hidden rounded-lg border border-border bg-bg-subtle cursor-grab active:cursor-grabbing"
+          className="mx-auto mt-4 cursor-grab touch-none select-none overflow-hidden rounded-lg border border-border bg-bg-subtle active:cursor-grabbing"
           style={{ width: VIEW, height: VIEW }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -252,8 +257,10 @@ type ProfileData = {
 
 export default function ProfilePage() {
   const toast = useToast();
+  const live = useCurrentUser();
   const [me, setMe] = useState<ProfileData | null>(null);
   const [fullName, setFullName] = useState("");
+  const [dirty, setDirty] = useState(false);
   const [savingName, setSavingName] = useState(false);
 
   const [avatarVersion, setAvatarVersion] = useState(0);
@@ -266,10 +273,8 @@ export default function ProfilePage() {
 
   const load = useCallback(async () => {
     try {
-      const m = await apiFetch<any>("/users/me/profile");
-      const u: ProfileData = m?.data ?? m;
+      const u = (await loadCurrentUser(true)) as ProfileData;
       setMe(u);
-      setFullName(u?.full_name ?? "");
     } catch (err: any) {
       toast.error("Load failed", err.message);
     }
@@ -278,6 +283,16 @@ export default function ProfilePage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Realtime: store berubah (WS profile_updated) → halaman ikut update.
+  useEffect(() => {
+    if (live) setMe(live as ProfileData);
+  }, [live]);
+
+  // Input mengikuti data DB selama user belum mengetik.
+  useEffect(() => {
+    if (me && !dirty) setFullName(me.full_name ?? "");
+  }, [me, dirty]);
 
   const match = pw.confirm.length > 0 ? pw.next === pw.confirm : null;
   const canSubmitPw =
@@ -304,6 +319,8 @@ export default function ProfilePage() {
         method: "PATCH",
         body: JSON.stringify({ full_name: fullName.trim() }),
       });
+      setDirty(false);
+      setCurrentUser({ full_name: fullName.trim() }); // sidebar update instan
       toast.success("Profile saved", "Full name updated.");
       load();
     } catch (err: any) {
@@ -332,6 +349,8 @@ export default function ProfilePage() {
       if (!res.ok) throw new Error(`Upload failed (${res.status})`);
       setAvatarFailed(false);
       setAvatarVersion((v) => v + 1);
+      // Sidebar avatar refresh tanpa reload
+      window.dispatchEvent(new CustomEvent("stockkit:avatar-changed"));
       toast.success("Avatar updated", "Foto profil diperbarui.");
     } catch (err: any) {
       toast.error("Upload failed", err.message);
@@ -381,7 +400,7 @@ export default function ProfilePage() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* ---------- Identity (prefilled from DB) ---------- */}
+        {/* ---------- Identity (prefilled from DB, live-synced) ---------- */}
         <div className="space-y-6 rounded-xl border border-border bg-bg-surface p-6">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-fg">Identitas</h2>
@@ -446,7 +465,10 @@ export default function ProfilePage() {
               </label>
               <input
                 value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
+                onChange={(e) => {
+                  setFullName(e.target.value);
+                  setDirty(true);
+                }}
                 className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg"
               />
             </div>
