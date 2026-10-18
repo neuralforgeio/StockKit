@@ -134,7 +134,7 @@ function ConfirmModal({
 }) {
   return (
     <div
-      className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
+      className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={onCancel}
     >
       <div
@@ -530,7 +530,7 @@ export default function UsersPage() {
       {/* Assign role modal */}
       {assigningFor && (
         <div
-          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
+          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
           onClick={() => setAssigningFor(null)}
         >
           <div
@@ -567,7 +567,7 @@ export default function UsersPage() {
       {/* Create user modal */}
       {createOpen && (
         <div
-          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
+          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
           onClick={() => setCreateOpen(false)}
         >
           <form
@@ -662,7 +662,7 @@ export default function UsersPage() {
       {/* Reset password modal */}
       {resetFor && (
         <div
-          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
+          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
           onClick={() => setResetFor(null)}
         >
           <form

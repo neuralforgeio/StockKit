@@ -346,7 +346,7 @@ export default function AuditLogsPage() {
       {/* Detail modal */}
       {selected && (
         <div
-          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
+          className="modal-fade fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
           onClick={() => setSelected(null)}
         >
           <div
