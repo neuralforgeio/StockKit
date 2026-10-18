@@ -54,3 +54,30 @@ export async function revokeRoleMgmt(
   );
   return body.data;
 }
+
+export type CreateUserInput = {
+  email: string;
+  full_name: string;
+  password: string;
+  roles: string[];
+};
+
+export async function createUserMgmt(
+  input: CreateUserInput,
+): Promise<ManagedUser> {
+  const body = await apiFetch<{ data: ManagedUser }>("/users-mgmt", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return body.data;
+}
+
+export async function resetPasswordMgmt(
+  userId: string,
+  password: string,
+): Promise<void> {
+  await apiFetch<{ status: string }>(`/users-mgmt/${userId}/reset-password`, {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+}

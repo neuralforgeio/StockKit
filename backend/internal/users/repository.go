@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/neuralforgeio/StockKit/internal/store/pg"
 )
 
 type User struct {
@@ -29,6 +30,13 @@ type Role struct {
 
 type Repository struct {
 	pool *pgxpool.Pool
+}
+
+type CreateUserInput struct {
+	Email        string
+	FullName     string
+	PasswordHash string
+	Roles        []string
 }
 
 func NewRepository(pool *pgxpool.Pool) *Repository {
@@ -185,4 +193,78 @@ func (r *Repository) RevokeRole(ctx context.Context, tenantID, userID, roleName 
 		return fmt.Errorf("role %q not assigned to user", roleName)
 	}
 	return nil
+}
+
+// Create inserts a user and grants initial roles atomically
+func (r *Repository) Create(ctx context.Context, tenantID string, input CreateUserInput) (*User, error) {
+	var userID string
+	err := pg.WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO users (tenant_id, email, password_hash, full_name, status, perm_version)
+			VALUES ($1, $2, $3, $4, 'active', 1)
+			RETURNING id`, tenantID, input.Email, input.PasswordHash, input.FullName).Scan(&userID); err != nil {
+			return fmt.Errorf("insert user: %w", err)
+		}
+		for _, roleName := range input.Roles {
+			tag, err := tx.Exec(ctx, `
+				INSERT INTO user_roles (tenant_id, user_id, role_id)
+				SELECT $1, $2, r.id FROM roles r WHERE r.tenant_id = $1 AND r.name = $3
+				ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING`, tenantID, userID, roleName)
+			if err != nil {
+				return fmt.Errorf("grant role %s: %w", roleName, err)
+			}
+			if tag.RowsAffected() == 0 {
+				return fmt.Errorf("role %q not found in tenant", roleName)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.GetByID(ctx, tenantID, userID)
+}
+
+// ResetPassword sets a new hash, bumps perm_version, and revokes ALL refresh
+// families/tokens so the target user is logged out from every device.
+func (r *Repository) ResetPassword(ctx context.Context, tenantID, userID, passwordHash string) error {
+	return pg.WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE users
+			SET password_hash = $1, perm_version = perm_version + 1, updated_at = now()
+			WHERE id = $2 AND tenant_id = $3`, passwordHash, userID, tenantID)
+		if err != nil {
+			return fmt.Errorf("update password: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("user not found")
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE refresh_families SET revoked_at = now()
+			WHERE user_id = $1 AND revoked_at IS NULL`, userID); err != nil {
+			return fmt.Errorf("revoke refresh families: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE refresh_tokens SET status = 'revoked'
+			WHERE status <> 'revoked'
+			  AND family_id IN (SELECT id FROM refresh_families WHERE user_id = $1)`, userID); err != nil {
+			return fmt.Errorf("revoke refresh tokens: %w", err)
+		}
+		return nil
+	})
+}
+
+// HasRole checks whether a user holds a specific role name in the tenant.
+func (r *Repository) HasRole(ctx context.Context, tenantID, userID, roleName string) (bool, error) {
+	var n int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM user_roles ur
+		JOIN roles r ON r.id = ur.role_id AND r.tenant_id = ur.tenant_id
+		WHERE ur.tenant_id = $1 AND ur.user_id = $2 AND r.name = $3`,
+		tenantID, userID, roleName).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }

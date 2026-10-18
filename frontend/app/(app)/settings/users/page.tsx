@@ -8,8 +8,10 @@ import { SearchInput } from "@/components/ui/search-input";
 import { useToast } from "@/components/ui/toast";
 import {
   assignRoleMgmt,
+  createUserMgmt,
   listRolesMgmt,
   listUsersMgmt,
+  resetPasswordMgmt,
   revokeRoleMgmt,
   type ManagedUser,
   type Role,
@@ -34,6 +36,17 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [assigningFor, setAssigningFor] = useState<ManagedUser | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [resetFor, setResetFor] = useState<ManagedUser | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [createDraft, setCreateDraft] = useState({
+    email: "",
+    full_name: "",
+    password: "",
+    confirm: "",
+    roles: [] as string[],
+  });
+  const [resetDraft, setResetDraft] = useState({ password: "", confirm: "" });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,6 +101,72 @@ export default function UsersPage() {
       toast.error("Revoke failed", err.message);
     }
   };
+  const toggleDraftRole = (name: string) =>
+    setCreateDraft((d) => ({
+      ...d,
+      roles: d.roles.includes(name)
+        ? d.roles.filter((r) => r !== name)
+        : [...d.roles, name],
+    }));
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (createDraft.password !== createDraft.confirm) {
+      toast.error("Validation failed", "Passwords do not match");
+      return;
+    }
+    if (createDraft.roles.length === 0) {
+      toast.error("Validation failed", "Select at least one role");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const u = await createUserMgmt({
+        email: createDraft.email.trim(),
+        full_name: createDraft.full_name.trim(),
+        password: createDraft.password,
+        roles: createDraft.roles,
+      });
+      setUsers((prev) => [u, ...prev]);
+      setCreateOpen(false);
+      setCreateDraft({
+        email: "",
+        full_name: "",
+        password: "",
+        confirm: "",
+        roles: [],
+      });
+      toast.success("User created", `${u.email} can now sign in.`);
+    } catch (err: any) {
+      toast.error("Create failed", err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetFor) return;
+    if (resetDraft.password !== resetDraft.confirm) {
+      toast.error("Validation failed", "Passwords do not match");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await resetPasswordMgmt(resetFor.id, resetDraft.password);
+      setResetFor(null);
+      setResetDraft({ password: "", confirm: "" });
+      toast.success(
+        "Password reset",
+        `${resetFor.email} must sign in again on all devices.`,
+      );
+      load();
+    } catch (err: any) {
+      toast.error("Reset failed", err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -105,9 +184,12 @@ export default function UsersPage() {
             the next request via automatic permission refresh.
           </p>
         </div>
-        <Button variant="secondary" onClick={load} disabled={loading}>
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={load} disabled={loading}>
+            Refresh
+          </Button>
+          <Button onClick={() => setCreateOpen(true)}>Create User</Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3 rounded-lg border border-border bg-bg-surface p-4">
@@ -185,14 +267,24 @@ export default function UsersPage() {
                       </div>
                     </td>
                     <td className="px-4 py-2 text-right">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => setAssigningFor(u)}
-                        disabled={availableRolesFor(u).length === 0}
-                      >
-                        + Role
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setResetFor(u)}
+                          title="Reset password (logs out all devices)"
+                        >
+                          Reset PW
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setAssigningFor(u)}
+                          disabled={availableRolesFor(u).length === 0}
+                        >
+                          + Role
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -236,6 +328,178 @@ export default function UsersPage() {
               </Button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Create user modal */}
+      {createOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setCreateOpen(false)}
+        >
+          <form
+            className="w-full max-w-md space-y-4 rounded-lg border border-border bg-bg-surface p-6"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleCreate}
+          >
+            <h2 className="text-lg font-semibold text-fg">Create user</h2>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">
+                Email
+              </label>
+              <input
+                type="email"
+                required
+                value={createDraft.email}
+                onChange={(e) =>
+                  setCreateDraft({ ...createDraft, email: e.target.value })
+                }
+                className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg"
+                placeholder="user@company.com"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">
+                Full name
+              </label>
+              <input
+                required
+                value={createDraft.full_name}
+                onChange={(e) =>
+                  setCreateDraft({ ...createDraft, full_name: e.target.value })
+                }
+                className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg"
+                placeholder="Nama lengkap"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-fg-muted">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  required
+                  minLength={8}
+                  value={createDraft.password}
+                  onChange={(e) =>
+                    setCreateDraft({ ...createDraft, password: e.target.value })
+                  }
+                  className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-fg-muted">
+                  Confirm
+                </label>
+                <input
+                  type="password"
+                  required
+                  minLength={8}
+                  value={createDraft.confirm}
+                  onChange={(e) =>
+                    setCreateDraft({ ...createDraft, confirm: e.target.value })
+                  }
+                  className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">
+                Roles
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {roles.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => toggleDraftRole(r.name)}
+                    className={`rounded px-2 py-1 text-xs font-medium transition ${
+                      createDraft.roles.includes(r.name)
+                        ? (ROLE_COLORS[r.name] ?? "bg-accent/15 text-accent")
+                        : "bg-bg-subtle text-fg-muted hover:text-fg"
+                    }`}
+                  >
+                    {r.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setCreateOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Creating..." : "Create user"}
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Reset password modal */}
+      {resetFor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setResetFor(null)}
+        >
+          <form
+            className="w-full max-w-sm space-y-4 rounded-lg border border-border bg-bg-surface p-6"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleReset}
+          >
+            <h2 className="text-lg font-semibold text-fg">Reset password</h2>
+            <p className="text-sm text-fg-muted">
+              {resetFor.email} akan logout dari semua perangkat dan wajib login
+              ulang.
+            </p>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">
+                New password
+              </label>
+              <input
+                type="password"
+                required
+                minLength={8}
+                value={resetDraft.password}
+                onChange={(e) =>
+                  setResetDraft({ ...resetDraft, password: e.target.value })
+                }
+                className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">
+                Confirm
+              </label>
+              <input
+                type="password"
+                required
+                minLength={8}
+                value={resetDraft.confirm}
+                onChange={(e) =>
+                  setResetDraft({ ...resetDraft, confirm: e.target.value })
+                }
+                className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setResetFor(null)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Resetting..." : "Reset password"}
+              </Button>
+            </div>
+          </form>
         </div>
       )}
     </div>
