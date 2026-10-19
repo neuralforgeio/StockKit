@@ -28,6 +28,17 @@
 
 ---
 
+### Multi-tenant Business Operations Platform for Indonesian Companies
+
+[Quick Start](#-quick-start) •
+[Features](#-features) •
+[Architecture](#️-architecture) •
+[API Docs](#-documentation) •
+[Frontend](#-frontend) •
+[Contributing](#-contributing)
+
+---
+
 ## 📖 Overview
 
 **StockKit** is a production-grade, multi-tenant ERP-like platform built for Indonesian businesses — from UMKM to project-based enterprises. It covers the complete business cycle: **inventory → purchasing → sales → finance → reporting**, with built-in approval workflows, FX rate management, and a developer-focused observability suite.
@@ -76,6 +87,7 @@ flowchart TB
     subgraph Client[Frontend Layer]
         UI[Next.js 16 UI]
         API_Client[API Client + Auto-Refresh]
+        WS[WebSocket Singleton]
     end
 
     subgraph Server[Backend Layer]
@@ -83,6 +95,9 @@ flowchart TB
         Handlers[Handlers]
         Services[Business Services]
         Repositories[Repositories]
+        RT[Realtime Hub]
+        AuditListener[Audit LISTEN]
+        ProfileListener[Profile LISTEN]
     end
 
     subgraph Data[Data Layer]
@@ -94,6 +109,7 @@ flowchart TB
 
     UI -->|HTTPS| Chi
     API_Client -->|Bearer + CSRF| Chi
+    WS <-->|WebSocket| RT
     Chi -->|AuthN + CSRF + Logging| Handlers
     Handlers --> Services
     Services --> Repositories
@@ -101,6 +117,11 @@ flowchart TB
     Repositories --> Redis
     Repositories --> MinIO
     Handlers --> Logs
+    PG -->|pg_notify audit_events| AuditListener
+    PG -->|pg_notify user_profile_events| ProfileListener
+    AuditListener --> RT
+    ProfileListener --> RT
+    RT --> WS
 ```
 
 ### Tech Stack
@@ -133,14 +154,14 @@ git clone https://github.com/neuralforgeio/StockKit.git
 cd StockKit
 
 # Environment
+cd backend
 cp .env.example .env
-# Edit .env — change all passwords for production
+# Edit .env — set POSTGRES_PASSWORD, JWT_EDDSA_KEY, FIELD_ENCRYPTION_KEY (see .env.example)
 
-# Start infrastructure
-docker compose up -d
+# Start PostgreSQL (if not using Docker)
+# Or: docker compose up -d
 
 # Backend
-cd backend
 go mod tidy
 go run ./cmd/api migrate up
 go run ./cmd/api seed          # seeds tenant, roles, developer user, initial data
@@ -154,11 +175,13 @@ npm install
 npm run dev                    # :3000
 ```
 
-### Default Credentials
-
-| Email | Password | Role |
-|-------|----------|------|
-| `dearlyfebrianoi@gmail.com` | `dearlyfebriano08` | `developer` + `owner` |
+### Bootstrap User (Alternative So Seed)
+```bash
+# Interactive prompts (password hidden, zero leak)
+# -> Email: admin@company.com
+# -> Password: ********
+# -> Confirm Password: ********
+```
 
 ### CLI Commands
 
@@ -182,11 +205,12 @@ go run ./cmd/api version      # Show build info
 | [🏛️ Architecture](docs/ARCHITECTURE.md) | Deep-dive into modules, data flow, decisions |
 | [🚢 Deployment](docs/DEPLOYMENT.md) | Production deployment & security hardening |
 | [🔐 Security](docs/SECURITY.md) | Auth flow, encryption, redaction, CSRF |
+| [🔍 Audit System](docs/SECURITY.md) | Realtime audit logs, LISTEN/NOTIFY, diff formatter, UUID resolution |
+| [👥 User Management](docs/SECURITY.md) | User lifecycle, RBAC, audit trail, bootstrap CLI |
 
 ---
 
 ## 🔄 Business Flow Example
-
 ```mermaid
 sequenceDiagram
     participant U as Sales User
@@ -196,19 +220,19 @@ sequenceDiagram
     participant F as Finance
 
     U->>SO: Create draft SO
-    U->>SO: Submit (triggers approval)
+    U->>SO: Submit for approval
     SO->>A: Create approval instance
     A-->>U: Notify approver
 
-    Note over A: If amount >= threshold
+    Note over A: Approval required when amount is at or above threshold
 
-    A->>A: Approver decides
-    A-->>SO: Status → approved
+    A->>A: Approver reviews and decides
+    A-->>SO: Status becomes approved
 
-    SO->>I: Checkout (reserve stock)
-    SO->>I: Deliver (OUT movement, COGS)
-    SO->>F: Create customer invoice (AR)
-    F->>F: Record customer receipt (cash in)
+    SO->>I: Checkout and reserve stock
+    SO->>I: Deliver goods and record OUT movement
+    SO->>F: Create customer invoice and record AR
+    F->>F: Record customer receipt
 ```
 
 ---
