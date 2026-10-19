@@ -32,6 +32,13 @@ const (
 	familyRateLimit = 10
 )
 
+// secureCookies toggles the Secure flag on session cookies. Configured once
+// from main based on env/TLS. Default false for local development.
+var secureCookies = false
+
+// SetSecureCookies configures the cookie Secure flag app-wide.
+func SetSecureCookies(v bool) { secureCookies = v }
+
 type Auth struct {
 	pool      *pgxpool.Pool
 	keyPair   *auth.KeyPair
@@ -346,9 +353,9 @@ func (h *Auth) setSessionCookies(w http.ResponseWriter, access, refresh, csrf st
 	if remember {
 		refreshMaxAge = int(refreshTokenTTL.Seconds())
 	}
-	http.SetCookie(w, &http.Cookie{Name: "access_token", Value: access, Path: "/", HttpOnly: true, Secure: false, SameSite: http.SameSiteLaxMode, MaxAge: int(accessTokenTTL.Seconds())})
-	http.SetCookie(w, &http.Cookie{Name: "refresh_token", Value: refresh, Path: "/api/v1/auth/refresh", HttpOnly: true, Secure: false, SameSite: http.SameSiteStrictMode, MaxAge: refreshMaxAge})
-	http.SetCookie(w, &http.Cookie{Name: "csrf", Value: csrf, Path: "/", HttpOnly: false, Secure: false, SameSite: http.SameSiteLaxMode, MaxAge: int(accessTokenTTL.Seconds())})
+	http.SetCookie(w, &http.Cookie{Name: "access_token", Value: access, Path: "/", HttpOnly: true, Secure: secureCookies, SameSite: http.SameSiteLaxMode, MaxAge: int(accessTokenTTL.Seconds())})
+	http.SetCookie(w, &http.Cookie{Name: "refresh_token", Value: refresh, Path: "/api/v1/auth/refresh", HttpOnly: true, Secure: secureCookies, SameSite: http.SameSiteStrictMode, MaxAge: refreshMaxAge})
+	http.SetCookie(w, &http.Cookie{Name: "csrf", Value: csrf, Path: "/", HttpOnly: false, Secure: secureCookies, SameSite: http.SameSiteLaxMode, MaxAge: int(accessTokenTTL.Seconds())})
 }
 
 // auditExec abstracts pgx.Tx and *pgxpool.Pool for audit and revocation operations.

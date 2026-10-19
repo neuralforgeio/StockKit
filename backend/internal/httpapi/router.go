@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -168,6 +169,7 @@ func New(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, rdb *redi
 	r.Use(middleware.Recoverer(logger))
 	r.Use(middleware.VersionHeader)
 	r.Use(middleware.SecurityHeaders)
+	r.Use(middleware.ProdSecurity(os.Getenv("STOCKKIT_ENV") == "production" || os.Getenv("TLS_CERT_FILE") != ""))
 	r.Use(middleware.CSRF)
 
 	r.Route("/api/v1", func(r chi.Router) {

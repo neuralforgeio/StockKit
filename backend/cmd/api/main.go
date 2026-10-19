@@ -25,6 +25,7 @@ import (
 	"github.com/neuralforgeio/StockKit/internal/config"
 	fieldcipher "github.com/neuralforgeio/StockKit/internal/crypto"
 	"github.com/neuralforgeio/StockKit/internal/httpapi"
+	"github.com/neuralforgeio/StockKit/internal/httpapi/handlers"
 	"github.com/neuralforgeio/StockKit/internal/httpapi/httperr"
 	"github.com/neuralforgeio/StockKit/internal/httpapi/middleware"
 	"github.com/neuralforgeio/StockKit/internal/logging"
@@ -136,13 +137,28 @@ func serve() error {
 		IdleTimeout:       120 * time.Second,
 	}
 
+	// TLS & cookie security: enabled by env (production) or cert presence.
+	tlsCert := os.Getenv("TLS_CERT_FILE")
+	tlsKey := os.Getenv("TLS_KEY_FILE")
+	handlers.SetSecureCookies(cfg.Env == "production" || tlsCert != "")
+
 	errCh := make(chan error, 1)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if tlsCert != "" && tlsKey != "" {
+			logger.Info("TLS enabled", "cert", tlsCert)
+			err = srv.ListenAndServeTLS(tlsCert, tlsKey)
+		} else {
+			if cfg.Env == "production" {
+				logger.Warn("production without TLS: set TLS_CERT_FILE and TLS_KEY_FILE")
+			}
+			err = srv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
-	logger.Info("api listening", "addr", srv.Addr, "env", cfg.Env)
+	logger.Info("api listening", "addr", srv.Addr, "env", cfg.Env, "tls", tlsCert != "" && tlsKey != "")
 
 	select {
 	case <-ctx.Done():
